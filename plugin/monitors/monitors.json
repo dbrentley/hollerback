@@ -1,0 +1,8 @@
+[
+  {
+    "name": "inbox",
+    "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/listen.py\"",
+    "description": "Questions and answers from the other Claude Code session",
+    "when": "always"
+  }
+]

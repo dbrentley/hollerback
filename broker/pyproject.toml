@@ -1,0 +1,16 @@
+[project]
+name = "hollerback-broker"
+version = "0.1.0"
+description = "Message bus between concurrent Claude Code sessions"
+requires-python = ">=3.11"
+dependencies = [
+    "starlette==0.42.0",
+    "uvicorn==0.34.0",
+]
+
+[project.scripts]
+hollerback-broker = "hollerback_broker.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

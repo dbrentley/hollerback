@@ -1,0 +1,21 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# broker state (never commit someone's message history or received files)
+*.db
+*.db-wal
+*.db-shm
+broker/files/
+
+# files received from peers land here inside a project
+.hollerback/
+.agentshare/
+
+# editors / os
+.DS_Store
+*.swp
+.idea/
+.vscode/

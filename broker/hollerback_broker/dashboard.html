@@ -1,0 +1,210 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hollerback — network</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --plane: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --hairline: #e1e0d9;
+    --border: rgba(11, 11, 11, 0.10);
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --accent: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --plane: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --muted: #898781;
+      --hairline: #2c2c2a;
+      --border: rgba(255, 255, 255, 0.10);
+      --accent: #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --plane: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --hairline: #2c2c2a;
+    --border: rgba(255, 255, 255, 0.10);
+    --accent: #3987e5;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 24px 20px 48px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .live { margin-left: auto; color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
+       color: var(--muted); font-weight: 600; margin: 28px 0 10px; }
+
+  .tiles { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .tile .v { font-size: 26px; font-weight: 620; letter-spacing: -0.02em; line-height: 1.1; }
+  .tile .k { color: var(--text-secondary); font-size: 12px; margin-top: 3px; }
+  .tile .n { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+  .peers { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .peer { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .peer .top { display: flex; align-items: center; gap: 8px; }
+  .peer .name { font-weight: 620; font-size: 15px; }
+  .peer dl { margin: 10px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; }
+  .peer dt { color: var(--muted); }
+  .peer dd { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+
+  /* Status never rides on colour alone: dot + word, always together. */
+  .status { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .s-online  { color: var(--good); }      .s-online  .dot { background: var(--good); }
+  .s-offline { color: var(--muted); }     .s-offline .dot { background: var(--muted); }
+  .owes { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--warning); }
+
+  .scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11px;
+       text-transform: uppercase; letter-spacing: 0.05em; padding: 9px 12px;
+       border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  .t { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .who { white-space: nowrap; }
+  .arrow { color: var(--muted); padding: 0 3px; }
+  .txt { color: var(--text-secondary); }
+  .kind { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+          text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
+          border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+  .k-question { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .k-answer   { color: var(--good);   border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+  .k-file     { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
+  .open { color: var(--warning); font-weight: 600; font-size: 11px; white-space: nowrap; }
+  .empty { padding: 28px 16px; text-align: center; color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>hollerback</h1>
+    <span class="sub">who is on the network</span>
+    <span class="live"><span class="pulse" id="pulse"></span><span id="livetext">connecting…</span></span>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <h2>Sessions</h2>
+  <div class="peers" id="peers"></div>
+
+  <h2>Recent activity</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>When</th><th>Kind</th><th>From → To</th><th>Message</th><th></th>
+      </tr></thead>
+      <tbody id="feed"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const ago = secs => {
+  if (secs == null) return "—";
+  if (secs < 60) return Math.round(secs) + "s ago";
+  if (secs < 3600) return Math.round(secs / 60) + "m ago";
+  if (secs < 86400) return Math.round(secs / 3600) + "h ago";
+  return Math.round(secs / 86400) + "d ago";
+};
+const bytes = n => n < 1024 ? n + " B"
+  : n < 1048576 ? (n / 1024).toFixed(1) + " KB"
+  : (n / 1048576).toFixed(1) + " MB";
+
+function tiles(c) {
+  const items = [
+    { v: `${c.peers_online}/${c.peers_total}`, k: "sessions online", n: "connected right now" },
+    { v: c.open_questions, k: "open questions", n: c.open_questions ? "awaiting an answer" : "all answered" },
+    { v: c.messages_24h, k: "messages, 24h", n: `${c.messages_total} all time` },
+    { v: c.files_total, k: "files shared", n: `${bytes(c.bytes_shared)}` +
+        (c.files_unfetched ? ` · ${c.files_unfetched} unfetched` : "") },
+  ];
+  document.getElementById("tiles").innerHTML = items.map(i =>
+    `<div class="tile"><div class="v">${esc(i.v)}</div>
+     <div class="k">${esc(i.k)}</div><div class="n">${esc(i.n)}</div></div>`).join("");
+}
+
+function peers(list) {
+  const el = document.getElementById("peers");
+  if (!list.length) { el.innerHTML = `<div class="empty">No sessions have connected yet.</div>`; return; }
+  el.innerHTML = list.map(p => {
+    const on = p.online;
+    return `<div class="peer">
+      <div class="top">
+        <span class="name">${esc(p.name)}</span>
+        <span class="status ${on ? "s-online" : "s-offline"}">
+          <span class="dot"></span>${on ? "online" : "offline"}</span>
+        ${p.open_questions ? `<span class="owes">${p.open_questions} to answer</span>` : ""}
+      </div>
+      <dl>
+        <dt>host</dt><dd>${esc(p.host || "—")}</dd>
+        <dt>working in</dt><dd>${esc(p.cwd || "—")}</dd>
+        <dt>last seen</dt><dd>${esc(on ? "now" : ago(p.seconds_since_seen))}</dd>
+      </dl></div>`;
+  }).join("");
+}
+
+function feed(msgs) {
+  const el = document.getElementById("feed");
+  if (!msgs.length) {
+    el.innerHTML = `<tr><td colspan="5" class="empty">Nothing has been sent yet.</td></tr>`;
+    return;
+  }
+  const now = Date.now() / 1000;
+  el.innerHTML = msgs.map(m => {
+    let body = m.text.length > 150 ? m.text.slice(0, 150) + "…" : m.text;
+    if (m.file) body = `${m.file.name} (${bytes(m.file.size)}) — ${body}`;
+    const flag = m.kind === "question" && !m.answered ? `<span class="open">open</span>` : "";
+    return `<tr>
+      <td class="t">${esc(ago(now - m.ts))}</td>
+      <td><span class="kind k-${esc(m.kind)}">${esc(m.kind)}</span></td>
+      <td class="who">${esc(m.from)}<span class="arrow">→</span>${esc(m.to)}</td>
+      <td class="txt">${esc(body)}</td>
+      <td>${flag}</td></tr>`;
+  }).join("");
+}
+
+async function tick() {
+  const pulse = document.getElementById("pulse"), text = document.getElementById("livetext");
+  try {
+    const r = await fetch("v1/dashboard", { cache: "no-store" });
+    const d = await r.json();
+    tiles(d.counts); peers(d.peers); feed(d.messages);
+    pulse.style.background = "var(--good)";
+    text.textContent = "live · updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    pulse.style.background = "var(--critical)";
+    text.textContent = "broker unreachable — retrying";
+  }
+}
+tick();
+setInterval(tick, 3000);
+</script>

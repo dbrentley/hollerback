@@ -1,0 +1,25 @@
+[Unit]
+Description=hollerback broker (message bus between Claude Code sessions)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/workplace/hollerback/broker
+EnvironmentFile=%h/.config/hollerback/broker.env
+ExecStart=%h/workplace/hollerback/broker/.venv/bin/python -m hollerback_broker.app
+Restart=always
+RestartSec=3
+# SSE streams are infinite generators, so uvicorn's graceful shutdown waits on
+# them forever and `systemctl restart` hangs in "deactivating". Give it a couple
+# of seconds to be polite, then kill the whole cgroup. Clients reconnect on
+# their own with backoff, and nothing is lost -- state is in SQLite.
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=5
+FinalKillSignal=SIGKILL
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

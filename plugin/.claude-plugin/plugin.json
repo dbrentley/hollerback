@@ -1,0 +1,22 @@
+{
+  "name": "hollerback",
+  "displayName": "Hollerback",
+  "description": "Ask the other Claude Code session a question and get an answer back, without copy-pasting between terminals.",
+  "version": "0.1.0",
+  "author": { "name": "brent" },
+  "userConfig": {
+    "AGENT_NAME": {
+      "type": "string",
+      "title": "This session's name",
+      "description": "How other sessions address this one, e.g. 'frontend' or 'backend'.",
+      "required": true
+    },
+    "BROKER_URL": {
+      "type": "string",
+      "title": "Broker URL",
+      "description": "Where the hollerback broker is running.",
+      "default": "http://127.0.0.1:8850",
+      "required": true
+    }
+  }
+}

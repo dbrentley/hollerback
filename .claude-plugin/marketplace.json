@@ -1,0 +1,16 @@
+{
+  "name": "hollerback",
+  "description": "Let concurrently-running Claude Code sessions ask each other questions and share files.",
+  "owner": {
+    "name": "brent"
+  },
+  "plugins": [
+    {
+      "name": "hollerback",
+      "source": "./plugin",
+      "description": "Ask the other Claude Code session a question and get an answer back, without copy-pasting between terminals. Needs a hollerback broker (see the repo README).",
+      "category": "collaboration",
+      "tags": ["multi-agent", "mcp", "messaging", "file-transfer"]
+    }
+  ]
+}

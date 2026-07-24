@@ -1,0 +1,17 @@
+{
+  "description": "hollerback: keep a woken peer session from stalling on permission prompts while it answers",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Grep|Glob|NotebookRead",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pretooluse.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

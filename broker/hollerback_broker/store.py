@@ -1,0 +1,412 @@
+"""SQLite persistence for hollerback.
+
+In-memory queues lose in-flight questions whenever the broker restarts (and it
+restarts on every code change, since the unit is Restart=always). A question
+you asked and then forgot about because the broker bounced is worse than no
+system at all, so durability lives here.
+
+WAL mode, short-lived connections, no ORM.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import sqlite3
+import time
+import uuid
+
+DB_PATH = pathlib.Path(
+    os.getenv("HOLLERBACK_DB", str(pathlib.Path.home() / ".local/share/hollerback/hollerback.db"))
+)
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS messages (
+    id          TEXT PRIMARY KEY,
+    to_agent    TEXT NOT NULL,
+    from_agent  TEXT NOT NULL,
+    kind        TEXT NOT NULL,          -- question | answer | note
+    text        TEXT NOT NULL,
+    context     TEXT NOT NULL DEFAULT '',
+    request_id  TEXT NOT NULL DEFAULT '',  -- answers point at their question
+    created_at  REAL NOT NULL,
+    delivered_at REAL,                  -- set when a live stream took it
+    answered_at REAL                    -- questions only
+);
+CREATE INDEX IF NOT EXISTS idx_messages_undelivered
+    ON messages(to_agent, delivered_at);
+CREATE INDEX IF NOT EXISTS idx_messages_open_questions
+    ON messages(to_agent, kind, answered_at);
+
+CREATE TABLE IF NOT EXISTS files (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,          -- basename as sent
+    rel_path    TEXT NOT NULL DEFAULT '', -- path relative to the sender's project
+    size        INTEGER NOT NULL,
+    sha256      TEXT NOT NULL DEFAULT '',
+    from_agent  TEXT NOT NULL,
+    to_agent    TEXT NOT NULL,
+    is_text     INTEGER NOT NULL DEFAULT 1,
+    created_at  REAL NOT NULL,
+    fetched_at  REAL
+);
+
+CREATE TABLE IF NOT EXISTS agents (
+    name        TEXT PRIMARY KEY,
+    session_id  TEXT NOT NULL DEFAULT '',
+    cwd         TEXT NOT NULL DEFAULT '',
+    host        TEXT NOT NULL DEFAULT '',
+    last_seen   REAL NOT NULL,
+    connected   INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
+def _conn() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    c = sqlite3.connect(DB_PATH, timeout=10)
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA busy_timeout=5000")
+    return c
+
+
+BLOB_DIR = DB_PATH.parent / "files"
+
+
+def init() -> None:
+    with _conn() as c:
+        c.executescript(SCHEMA)
+        # Additive migration for databases created before file sharing existed.
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(messages)")}
+        if "file_id" not in cols:
+            c.execute("ALTER TABLE messages ADD COLUMN file_id TEXT NOT NULL DEFAULT ''")
+        fcols = {r["name"] for r in c.execute("PRAGMA table_info(files)")}
+        if fcols and "fetched_at" not in fcols:
+            c.execute("ALTER TABLE files ADD COLUMN fetched_at REAL")
+    BLOB_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def add_file(
+    name: str,
+    rel_path: str,
+    data: bytes,
+    from_agent: str,
+    to_agent: str,
+    is_text: bool,
+) -> dict:
+    import hashlib
+
+    file_id = uuid.uuid4().hex[:10]
+    BLOB_DIR.mkdir(parents=True, exist_ok=True)
+    (BLOB_DIR / file_id).write_bytes(data)
+    digest = hashlib.sha256(data).hexdigest()
+    now = time.time()
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO files (id,name,rel_path,size,sha256,from_agent,to_agent,is_text,created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (file_id, name, rel_path, len(data), digest, from_agent, to_agent, int(is_text), now),
+        )
+    return {
+        "id": file_id,
+        "name": name,
+        "rel_path": rel_path,
+        "size": len(data),
+        "sha256": digest,
+        "from": from_agent,
+        "to": to_agent,
+        "is_text": is_text,
+    }
+
+
+def get_file_meta(file_id: str) -> dict | None:
+    with _conn() as c:
+        r = c.execute("SELECT * FROM files WHERE id=?", (file_id,)).fetchone()
+    if r is None:
+        return None
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "rel_path": r["rel_path"],
+        "size": r["size"],
+        "sha256": r["sha256"],
+        "from": r["from_agent"],
+        "to": r["to_agent"],
+        "is_text": bool(r["is_text"]),
+    }
+
+
+def get_file_bytes(file_id: str) -> bytes | None:
+    path = BLOB_DIR / file_id
+    return path.read_bytes() if path.is_file() else None
+
+
+def _row_to_msg(r: sqlite3.Row) -> dict:
+    msg = {
+        "id": r["id"],
+        "to": r["to_agent"],
+        "from": r["from_agent"],
+        "kind": r["kind"],
+        "text": r["text"],
+        "context": r["context"],
+        "request_id": r["request_id"],
+        "ts": r["created_at"],
+    }
+    keys = r.keys()
+    if "file_id" in keys and r["file_id"]:
+        msg["file_id"] = r["file_id"]
+        meta = get_file_meta(r["file_id"])
+        if meta:
+            msg["file"] = meta
+    return msg
+
+
+def add_message(
+    to_agent: str,
+    from_agent: str,
+    kind: str,
+    text: str,
+    context: str = "",
+    request_id: str = "",
+    file_id: str = "",
+) -> dict:
+    msg_id = uuid.uuid4().hex[:8]
+    now = time.time()
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO messages (id,to_agent,from_agent,kind,text,context,request_id,created_at,file_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (msg_id, to_agent, from_agent, kind, text, context, request_id, now, file_id),
+        )
+    out_file = get_file_meta(file_id) if file_id else None
+    return {
+        **({"file_id": file_id, "file": out_file} if out_file else {}),
+        "id": msg_id,
+        "to": to_agent,
+        "from": from_agent,
+        "kind": kind,
+        "text": text,
+        "context": context,
+        "request_id": request_id,
+        "ts": now,
+    }
+
+
+def mark_delivered(msg_id: str) -> None:
+    with _conn() as c:
+        c.execute(
+            "UPDATE messages SET delivered_at=? WHERE id=? AND delivered_at IS NULL",
+            (time.time(), msg_id),
+        )
+
+
+def take_undelivered(to_agent: str) -> list[dict]:
+    """What to hand a session the moment it attaches.
+
+    Two categories, and the second one matters more than it looks:
+
+    1. Anything never written to a stream at all.
+    2. Any QUESTION that was written to a stream but is still unanswered.
+    3. Any FILE that was announced but never actually fetched.
+
+    (2) exists because "delivered" only ever meant "bytes were written". It did
+    not mean the peer's model ever saw it -- a monitor that is starting up, or
+    a plugin that failed to load, swallows the line silently and the question is
+    lost forever. Re-offering unanswered questions on each fresh attach makes
+    that self-healing: the worst case is the peer sees a reminder for something
+    it is already working on, and answering clears it for good.
+
+    Answers and notes are deliberately NOT re-sent -- they are not actionable,
+    so repeating them would just be noise.
+    """
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT m.* FROM messages m"
+            " LEFT JOIN files f ON f.id = m.file_id"
+            " WHERE m.to_agent=?"
+            " AND ("
+            "   m.delivered_at IS NULL"
+            "   OR (m.kind='question' AND m.answered_at IS NULL)"
+            "   OR (m.kind='file' AND f.fetched_at IS NULL)"
+            " )"
+            " AND NOT (m.kind='question' AND m.answered_at IS NOT NULL)"
+            " ORDER BY m.created_at",
+            (to_agent,),
+        ).fetchall()
+        now = time.time()
+        for r in rows:
+            c.execute("UPDATE messages SET delivered_at=? WHERE id=?", (now, r["id"]))
+    return [_row_to_msg(r) for r in rows]
+
+
+def get_message(msg_id: str) -> dict | None:
+    """Any message by id, with its answer attached if it is an answered question.
+
+    Exists because task notifications are truncated for display, so a long
+    answer can arrive unreadable. The id is always in the notification line.
+    """
+    with _conn() as c:
+        r = c.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+        if r is None:
+            return None
+        msg = _row_to_msg(r)
+        msg["answered"] = r["answered_at"] is not None
+        if r["kind"] == "question":
+            a = c.execute(
+                "SELECT * FROM messages WHERE kind='answer' AND request_id=?"
+                " ORDER BY created_at DESC LIMIT 1",
+                (msg_id,),
+            ).fetchone()
+            if a is not None:
+                msg["answer"] = _row_to_msg(a)
+        elif r["request_id"]:
+            q = c.execute(
+                "SELECT * FROM messages WHERE id=?", (r["request_id"],)
+            ).fetchone()
+            if q is not None:
+                msg["in_reply_to"] = _row_to_msg(q)
+    return msg
+
+
+def get_question(request_id: str) -> dict | None:
+    with _conn() as c:
+        r = c.execute(
+            "SELECT * FROM messages WHERE id=? AND kind='question'", (request_id,)
+        ).fetchone()
+    return _row_to_msg(r) if r else None
+
+
+def mark_answered(request_id: str) -> None:
+    with _conn() as c:
+        c.execute(
+            "UPDATE messages SET answered_at=? WHERE id=? AND answered_at IS NULL",
+            (time.time(), request_id),
+        )
+
+
+def open_questions(to_agent: str) -> list[dict]:
+    """Questions this agent has been asked and has not answered yet."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM messages WHERE to_agent=? AND kind='question'"
+            " AND answered_at IS NULL ORDER BY created_at",
+            (to_agent,),
+        ).fetchall()
+    return [_row_to_msg(r) for r in rows]
+
+
+def awaiting_answers(from_agent: str) -> list[dict]:
+    """Questions this agent asked that are still unanswered."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM messages WHERE from_agent=? AND kind='question'"
+            " AND answered_at IS NULL ORDER BY created_at",
+            (from_agent,),
+        ).fetchall()
+    return [_row_to_msg(r) for r in rows]
+
+
+def touch_agent(
+    name: str, connected: bool, session_id: str = "", cwd: str = "", host: str = ""
+) -> None:
+    now = time.time()
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO agents (name,session_id,cwd,host,last_seen,connected)"
+            " VALUES (?,?,?,?,?,?)"
+            " ON CONFLICT(name) DO UPDATE SET last_seen=excluded.last_seen,"
+            "  connected=excluded.connected,"
+            "  session_id=CASE WHEN excluded.session_id!='' THEN excluded.session_id ELSE agents.session_id END,"
+            "  cwd=CASE WHEN excluded.cwd!='' THEN excluded.cwd ELSE agents.cwd END,"
+            "  host=CASE WHEN excluded.host!='' THEN excluded.host ELSE agents.host END",
+            (name, session_id, cwd, host, now, 1 if connected else 0),
+        )
+
+
+def list_agents() -> list[dict]:
+    with _conn() as c:
+        rows = c.execute("SELECT * FROM agents ORDER BY name").fetchall()
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "name": r["name"],
+                "online": bool(r["connected"]),
+                "cwd": r["cwd"],
+                "host": r["host"],
+                "session_id": r["session_id"],
+                "last_seen": r["last_seen"],
+                "seconds_since_seen": round(time.time() - r["last_seen"], 1),
+                "open_questions": len(open_questions(r["name"])),
+            }
+        )
+    return out
+
+
+def mark_fetched(file_id: str) -> None:
+    with _conn() as c:
+        c.execute(
+            "UPDATE files SET fetched_at=? WHERE id=? AND fetched_at IS NULL",
+            (time.time(), file_id),
+        )
+
+
+def pending_files(to_agent: str) -> list[dict]:
+    """Files sent to this agent that it has not saved yet.
+
+    check_inbox reported only questions, so a session could be told its inbox
+    was "clear" while files sat waiting -- which is exactly what the frontend
+    session reported. Anything the peer is waiting on us to act on belongs here.
+    """
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM files WHERE to_agent=? AND fetched_at IS NULL"
+            " ORDER BY created_at",
+            (to_agent,),
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "rel_path": r["rel_path"],
+            "size": r["size"],
+            "from": r["from_agent"],
+        }
+        for r in rows
+    ]
+
+
+def recent_messages(limit: int = 40) -> list[dict]:
+    """Newest-first activity feed for the dashboard."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM messages ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    out = []
+    for r in rows:
+        m = _row_to_msg(r)
+        m["answered"] = r["answered_at"] is not None
+        m["delivered"] = r["delivered_at"] is not None
+        out.append(m)
+    return out
+
+
+def counts() -> dict:
+    with _conn() as c:
+        q = lambda sql, *a: c.execute(sql, a).fetchone()[0]  # noqa: E731
+        return {
+            "peers_online": q("SELECT COUNT(*) FROM agents WHERE connected=1"),
+            "peers_total": q("SELECT COUNT(*) FROM agents"),
+            "open_questions": q(
+                "SELECT COUNT(*) FROM messages WHERE kind='question' AND answered_at IS NULL"
+            ),
+            "messages_total": q("SELECT COUNT(*) FROM messages"),
+            "messages_24h": q(
+                "SELECT COUNT(*) FROM messages WHERE created_at > ?", time.time() - 86400
+            ),
+            "files_total": q("SELECT COUNT(*) FROM files"),
+            "files_unfetched": q("SELECT COUNT(*) FROM files WHERE fetched_at IS NULL"),
+            "bytes_shared": q("SELECT COALESCE(SUM(size),0) FROM files"),
+        }
