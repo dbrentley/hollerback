@@ -38,7 +38,7 @@ try {
   Write-Host "    broker reachable, ok=$($health.ok)" -ForegroundColor Green
 } catch {
   Write-Host "    CANNOT REACH BROKER at $Broker" -ForegroundColor Red
-  Write-Host "    Is Tailscale up, and is hollerback-broker running on ada?" -ForegroundColor Red
+  Write-Host "    Is the network up, and is hollerback-broker running on that host?" -ForegroundColor Red
   exit 1
 }
 

@@ -10,7 +10,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/install-broker.sh | bash
 #
 #   # several machines -- bind the private address peers reach you on
-#   ./install-broker.sh --bind 100.88.173.55
+#   ./install-broker.sh --bind 100.64.0.5
 #
 # There is NO AUTHENTICATION. Bind loopback, or a private overlay network
 # (Tailscale/WireGuard/VPN). Never bind 0.0.0.0 on a network you don't trust.

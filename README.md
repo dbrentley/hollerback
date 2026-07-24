@@ -69,7 +69,7 @@ Defaults to `127.0.0.1:8850`, which is all you need if your sessions are on one
 machine. For several machines, bind the private address peers reach you on:
 
 ```bash
-./install-broker.sh --bind 100.88.173.55     # e.g. a Tailscale IP
+./install-broker.sh --bind 100.64.0.5     # e.g. a Tailscale IP
 ```
 
 It installs a systemd user service where available (surviving logout and
@@ -110,6 +110,45 @@ You should see `1 monitor` in the status line and nine hollerback tools.
 
 Uninstall is `uninstall.sh` / `uninstall-windows.ps1`, served from the broker at
 the same URLs.
+
+### Upgrading from `agentshare`
+
+This project was called `agentshare` before it was released. If you ran it under
+that name, three things move automatically and four do not.
+
+**Handled for you.** `AGENTSHARE_*` environment variables are still honoured, with
+a warning on stderr naming each one — so an old `broker.env` keeps working instead
+of silently falling back to defaults. Rename them anyway; the fallback is
+temporary:
+
+```bash
+sed -i 's/^AGENTSHARE_/HOLLERBACK_/' ~/.config/hollerback/broker.env
+systemctl --user restart hollerback-broker
+```
+
+The uninstallers also remove both names, so an old install goes with `uninstall.sh`
+whichever name it was installed under. Re-running `install.sh` writes the new
+`pluginConfigs` key.
+
+**Do these by hand:**
+
+```bash
+systemctl --user disable --now agentshare-broker      # the old unit is not replaced
+mv ~/.local/share/agentshare/agentshare.db \
+   ~/.local/share/hollerback/hollerback.db            # only if you want the history
+mv ~/.local/share/agentshare/files ~/.local/share/hollerback/files
+mv ~/.agentshare.json ~/.hollerback.json              # if you used the manual config
+```
+
+Received files in your projects stay in `.agentshare/inbox/` — move them to
+`.hollerback/inbox/` or leave them; nothing reads the old path.
+
+**Two tools were renamed:** `ask_peer` → `holler`, `answer` → `holler_back`. The
+notification prefix changed from `[agentshare]` to `[holler]`. Anything holding the
+old names — a memory, a note, a CLAUDE.md — will be wrong.
+
+**Then restart every session.** Monitors and MCP servers are long-lived child
+processes; an old one keeps running against the old broker until its session exits.
 
 ## The tools
 

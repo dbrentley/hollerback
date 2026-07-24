@@ -5,8 +5,8 @@
 # scope silently strips monitors), and points it at the broker under a name you
 # choose. Re-run any time to update.
 #
-#   curl -fsSL http://100.88.173.55:8850/install.sh | bash -s -- --agent docs
-#   ./install.sh --agent docs --broker http://100.88.173.55:8850
+#   curl -fsSL http://100.64.0.5:8850/install.sh | bash -s -- --agent docs
+#   ./install.sh --agent docs --broker http://100.64.0.5:8850
 set -uo pipefail
 
 BROKER="http://127.0.0.1:8850"

@@ -23,6 +23,29 @@ def log(msg: str) -> None:
     print(f"[holler] {msg}", file=sys.stderr, flush=True)
 
 
+def _adopt_legacy_env() -> None:
+    """Honour pre-rename AGENTSHARE_* variables, once, on stderr.
+
+    Same silent-failure class as the broker's (see hollerback_broker/__init__):
+    an AGENTSHARE_AGENT left in a shell alias or launcher is simply ignored after
+    the rename, and the session comes up unconfigured with nothing said about why.
+    """
+    adopted = []
+    for old, value in sorted(os.environ.items()):
+        if not old.startswith("AGENTSHARE_") or not value:
+            continue
+        new = "HOLLERBACK_" + old[len("AGENTSHARE_") :]
+        if not os.environ.get(new):
+            os.environ[new] = value
+            adopted.append(f"{old} -> {new}")
+    if adopted:
+        log("honouring deprecated AGENTSHARE_* env vars: " + ", ".join(adopted))
+        log("rename them to HOLLERBACK_* -- this fallback will not last forever")
+
+
+_adopt_legacy_env()
+
+
 def load_config() -> dict:
     """Resolve settings without them ever passing through a shell.
 
