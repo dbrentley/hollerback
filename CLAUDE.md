@@ -272,15 +272,15 @@ holds received files and self-ignores via a `.gitignore` written on first use.
   blocking on a reply.
 - **Plugin identity string** `hollerback@skills-dir` is duplicated in
   `plugin/bin/_common.py`, `install.sh`, `install-windows.ps1`, `uninstall.sh` and
-  `uninstall-windows.ps1`. All five move together. It is also the *only*
-  `pluginConfigs` key `load_config()` will look at — so a plugin installed any other
-  way (e.g. the marketplace route in the README, which registers under a different
-  `plugin@marketplace` source name) lands its `--config` values under a key nothing
-  reads. The failure is maximally confusing: the plugin loads, `1 monitor` shows,
-  all 9 tools appear, and then every tool answers *"hollerback is not configured"*
-  while `listen.py` exits 0 having logged only to stderr. For non-`skills-dir`
-  installs, configure via `~/.hollerback.json` or `HOLLERBACK_*` env vars. The
-  uninstallers strip only the `@skills-dir` key, so other configs survive uninstall.
+  `uninstall-windows.ps1`. All five move together. Note it is *not* the only
+  `pluginConfigs` key read: the runtime keys config by the plugin's source id
+  (`${name}@${marketplace}`), so `claude plugin install` writes
+  `hollerback@hollerback` instead. `_candidate_sources()` accepts `@skills-dir`
+  first and then any `hollerback@*` key, which is what makes the marketplace route
+  and forks work — reading only one of them produced the worst failure in the
+  project: plugin loads, `1 monitor` shows, all 9 tools appear, and every tool
+  answers *"hollerback is not configured"*. **The uninstallers still strip only the
+  `@skills-dir` key**, so a marketplace-installed config survives uninstall.
 - **Config precedence** (`_common.load_config`): env `HOLLERBACK_*` >
   `~/.hollerback.json` > `pluginConfigs["hollerback@skills-dir"].options` in
   `~/.claude/settings.json`. Both *file* reads use `utf-8-sig` because PowerShell

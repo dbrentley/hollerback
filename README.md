@@ -78,7 +78,7 @@ reboot), and tells you how to run it manually where not.
 ### 2. The plugin, on each session's machine
 
 ```bash
-curl -fsSL http://<broker>:8850/install.sh | bash -s -- --agent backend
+curl -fsSL http://<broker>:8850/install.sh | bash -s -- --agent backend --broker http://<broker>:8850
 ```
 
 ```powershell

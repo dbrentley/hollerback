@@ -13,6 +13,27 @@ import urllib.request
 PLUGIN_SOURCE = "hollerback@skills-dir"
 
 
+def _candidate_sources(configs: dict) -> list:
+    """Every plugin-source key that could hold this plugin's config, best first.
+
+    `pluginConfigs` is keyed by the plugin's *source id*, and there is more than
+    one. install.sh / install-windows.ps1 write PLUGIN_SOURCE. `claude plugin
+    install` instead uses "<plugin>@<marketplace>" -- "hollerback@hollerback" for
+    this repo's marketplace.json, or "hollerback@<their-marketplace>" for a fork.
+
+    Reading only PLUGIN_SOURCE made the documented marketplace install fail in the
+    most confusing way available: the plugin loaded, the monitor armed, all nine
+    tools appeared, and then every one of them answered "hollerback is not
+    configured" -- while listen.py exited 0 having logged the reason to stderr,
+    where nobody looks.
+    """
+    ordered = [PLUGIN_SOURCE] if PLUGIN_SOURCE in configs else []
+    ordered += sorted(
+        k for k in configs if k.startswith("hollerback@") and k != PLUGIN_SOURCE
+    )
+    return ordered
+
+
 def log(msg: str) -> None:
     """Diagnostics go to stderr.
 
@@ -62,15 +83,19 @@ def load_config() -> dict:
 
     settings = pathlib.Path.home() / ".claude" / "settings.json"
     try:
-        opts = (
-            json.loads(settings.read_text(encoding="utf-8-sig"))
-            .get("pluginConfigs", {})
-            .get(PLUGIN_SOURCE, {})
-            .get("options", {})
+        configs = json.loads(settings.read_text(encoding="utf-8-sig")).get(
+            "pluginConfigs", {}
         )
-        cfg["agent"] = opts.get("AGENT_NAME", "") or cfg["agent"]
-        cfg["broker"] = opts.get("BROKER_URL", "") or cfg["broker"]
-        cfg["token"] = opts.get("BROKER_TOKEN", "") or cfg["token"]
+        for source in _candidate_sources(configs):
+            entry = configs.get(source) or {}
+            opts = entry.get("options", {}) if isinstance(entry, dict) else {}
+            if not isinstance(opts, dict):
+                continue
+            # First source that supplies a field wins, so an explicit
+            # install.sh config still beats a stale marketplace entry.
+            cfg["agent"] = cfg["agent"] or opts.get("AGENT_NAME", "")
+            cfg["broker"] = cfg["broker"] or opts.get("BROKER_URL", "")
+            cfg["token"] = cfg["token"] or opts.get("BROKER_TOKEN", "")
     except FileNotFoundError:
         pass
     except Exception as exc:  # noqa: BLE001

@@ -1040,11 +1040,18 @@ when `c12aa2e` was committed, and none are fixed.
   window in *every* session on the box resolving to that name, including repos that never opted
   into hollerback. The narrowing in [§4.11](#411-test-traffic-colliding-with-real-sessions) made
   it per-agent, not per-session.
-- **The marketplace install path lands config under a key nothing reads.** `load_config()` only
-  looks at `pluginConfigs["hollerback@skills-dir"]`. The plugin loads, `1 monitor` shows, all 9
-  tools appear — and then every tool answers *"hollerback is not configured"* while `listen.py`
-  exits 0 having logged only to stderr. This is the unverified path from
-  [§5](#packaging).
+- **The marketplace install path landed config under a key nothing read.** `load_config()` only
+  looked at `pluginConfigs["hollerback@skills-dir"]`. The plugin loaded, `1 monitor` showed, all
+  9 tools appeared — and then every tool answered *"hollerback is not configured"* while
+  `listen.py` exited 0 having logged only to stderr. This is the unverified path from
+  [§5](#packaging), and the reason it went unnoticed: `marketplace add` succeeded, so the step
+  looked like it had passed.
+  **Fixed 2026-07-25.** Confirmed against the 2.1.220 binary — the source-id template is
+  `${e.name}@${e.marketplace}` and settings are indexed `pluginConfigs[${e}]` — so
+  `claude plugin install hollerback@hollerback` writes `hollerback@hollerback`.
+  `_candidate_sources()` now reads `@skills-dir` first, then any `hollerback@*` key, which also
+  covers forks whose marketplace has a different name. Still open: the uninstallers strip only
+  the `@skills-dir` key, so a marketplace config survives uninstall.
 - **`HOLLERBACK_KEEPALIVE_SECS` (20, server) must stay below `listen.py`'s hardcoded
   `READ_TIMEOUT = 60`.** Nothing validates it. Raise it past 60 and every client enters a
   permanent 60-second reconnect loop, replaying the whole backlog each cycle.
