@@ -405,27 +405,60 @@ async def plugin_zip(request: Request) -> Response:
     )
 
 
-def _serve_script(name: str) -> Response:
+# The scripts ship with a 127.0.0.1 default so they still work when run from a local checkout.
+# But a broker bound to a specific address (--bind 100.x.y.z, the normal Tailscale setup) is NOT
+# reachable on 127.0.0.1, so anyone piping `curl <broker>/install.sh | bash` got the loopback default
+# and a "CANNOT REACH BROKER" failure — while following the instructions exactly.
+# The broker serves these scripts, so it knows the URL the caller reached it on: stamp that in as the
+# default. Explicit --broker/-Broker still wins, since it overwrites the default at parse time.
+_BROKER_DEFAULTS = {
+    "install.sh": 'BROKER="http://127.0.0.1:8850"',
+    "uninstall.sh": 'BROKER="http://127.0.0.1:8850"',
+    "install-windows.ps1": '[string]$Broker    = "http://127.0.0.1:8850",',
+    "uninstall-windows.ps1": '[string]$Broker    = "http://127.0.0.1:8850",',
+}
+
+
+def _public_base_url(request: Request) -> str | None:
+    """The base URL the client actually reached us on, from the Host header it sent."""
+    host = request.headers.get("host")
+
+    if not host:
+        return None
+
+    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+    return f"{scheme}://{host}"
+
+
+def _serve_script(name: str, request: Request | None = None) -> Response:
     script = PLUGIN_DIR.parent / name
     if not script.is_file():
         return JSONResponse({"ok": False, "error": f"{name} not found"}, status_code=404)
-    return Response(script.read_text(), media_type="text/plain; charset=utf-8")
+
+    text = script.read_text()
+    default = _BROKER_DEFAULTS.get(name)
+    base = _public_base_url(request) if request is not None else None
+
+    if default and base and default in text:
+        text = text.replace(default, default.replace("http://127.0.0.1:8850", base), 1)
+
+    return Response(text, media_type="text/plain; charset=utf-8")
 
 
 async def install_ps1(request: Request) -> Response:
-    return _serve_script("install-windows.ps1")
+    return _serve_script("install-windows.ps1", request)
 
 
 async def install_sh(request: Request) -> Response:
-    return _serve_script("install.sh")
+    return _serve_script("install.sh", request)
 
 
 async def uninstall_ps1(request: Request) -> Response:
-    return _serve_script("uninstall-windows.ps1")
+    return _serve_script("uninstall-windows.ps1", request)
 
 
 async def uninstall_sh(request: Request) -> Response:
-    return _serve_script("uninstall.sh")
+    return _serve_script("uninstall.sh", request)
 
 
 app = Starlette(

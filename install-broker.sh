@@ -151,10 +151,10 @@ Dashboard: http://$BIND:$PORT/          <- who is on the network
 
 Now install the plugin in each session's machine:
 
-    curl -fsSL http://$BIND:$PORT/install.sh | bash -s -- --agent backend
+    curl -fsSL http://$BIND:$PORT/install.sh | bash -s -- --agent backend --broker http://$BIND:$PORT
     # Windows:
     #   iwr http://$BIND:$PORT/install.ps1 -OutFile \$env:TEMP\\hb.ps1
-    #   powershell -ExecutionPolicy Bypass -File \$env:TEMP\\hb.ps1 -AgentName frontend
+    #   powershell -ExecutionPolicy Bypass -File \$env:TEMP\\hb.ps1 -AgentName frontend -Broker http://$BIND:$PORT
 
 Then START A NEW SESSION in each (not /reload-plugins), in a TRUSTED workspace.
 EOF
