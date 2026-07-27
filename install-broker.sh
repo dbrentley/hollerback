@@ -149,12 +149,15 @@ cat <<EOF
 Broker:    http://$BIND:$PORT
 Dashboard: http://$BIND:$PORT/          <- who is on the network
 
-Now install the plugin in each session's machine:
+Now install the plugin on each session's machine -- once per machine, nothing
+to name. Each session identifies itself as <host>:<project-dir>, so every
+workspace is automatically its own agent.
 
-    curl -fsSL http://$BIND:$PORT/install.sh | bash -s -- --agent backend --broker http://$BIND:$PORT
+    curl -fsSL http://$BIND:$PORT/install.sh | bash -s -- --broker http://$BIND:$PORT
+
     # Windows:
-    #   iwr http://$BIND:$PORT/install.ps1 -OutFile \$env:TEMP\\hb.ps1
-    #   powershell -ExecutionPolicy Bypass -File \$env:TEMP\\hb.ps1 -AgentName frontend -Broker http://$BIND:$PORT
+    #   & ([scriptblock]::Create((iwr http://$BIND:$PORT/install.ps1 -UseBasicParsing).Content)) -Broker http://$BIND:$PORT
 
-Then START A NEW SESSION in each (not /reload-plugins), in a TRUSTED workspace.
+Then START A NEW SESSION in each (not /reload-plugins), in a TRUSTED workspace,
+and call announce() once in each so peers can see what it is.
 EOF

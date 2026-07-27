@@ -79,23 +79,23 @@ reboot), and tells you how to run it manually where not.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/install.sh \
-  | bash -s -- --agent backend --broker http://<broker>:8850
+  | bash -s -- --broker http://<broker>:8850
 ```
 
 ```powershell
 & ([scriptblock]::Create((iwr https://raw.githubusercontent.com/dbrentley/hollerback/main/install-windows.ps1 -UseBasicParsing).Content)) `
-    -AgentName frontend -Broker http://<broker>:8850
+    -Broker http://<broker>:8850
 ```
 
 The broker serves the same scripts, if you'd rather not go out to GitHub — and
-that form fills in its own URL, so you can drop `--broker` / `-Broker`:
+that form fills in its own URL, so you can drop `--broker` / `-Broker` entirely:
 
 ```bash
-curl -fsSL http://<broker>:8850/install.sh | bash -s -- --agent backend
+curl -fsSL http://<broker>:8850/install.sh | bash
 ```
 ```powershell
 iwr http://<broker>:8850/install.ps1 -OutFile $env:TEMP\hb.ps1
-powershell -ExecutionPolicy Bypass -File $env:TEMP\hb.ps1 -AgentName frontend -Broker http://<broker>:8850
+powershell -ExecutionPolicy Bypass -File $env:TEMP\hb.ps1 -Broker http://<broker>:8850
 ```
 
 The plugin comes from the broker when it can be reached and from GitHub when it
@@ -105,7 +105,7 @@ Or through Claude Code's own plugin system:
 
 ```bash
 claude plugin marketplace add dbrentley/hollerback
-claude plugin install hollerback@hollerback --config AGENT_NAME=backend --config BROKER_URL=http://<broker>:8850
+claude plugin install hollerback@hollerback --config BROKER_URL=http://<broker>:8850
 ```
 
 **Nothing is named.** Each session identifies itself as `<host>:<project-dir>`, and
@@ -124,7 +124,7 @@ Two things silently do nothing otherwise:
 - **The workspace must be trusted.** Monitors are skipped in an untrusted
   workspace with no error at all.
 
-You should see `1 monitor` in the status line and nine hollerback tools.
+You should see `1 monitor` in the status line and ten hollerback tools.
 
 ### Uninstall
 

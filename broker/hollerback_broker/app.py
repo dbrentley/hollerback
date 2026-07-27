@@ -93,7 +93,7 @@ async def _notify_departure(agent: str) -> None:
     mid-question simply never hears back, and has no way to tell "still thinking"
     from "that session no longer exists". Nothing else in the system ever pushes
     a departure -- connected=False is written once, in the stream's finally block,
-    and read only by whoever thinks to call list_peers.
+    and read only by whoever thinks to call discover.
 
     Sent as kind='note' on purpose. A new kind would fall through the `file`/`note`
     branches of an older listen.py straight into the *question* formatter, and the

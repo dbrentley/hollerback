@@ -180,15 +180,17 @@ def main() -> int:
     broker = args.broker or cfg["broker"]
     token = args.token or cfg["token"]
 
-    if not agent or not broker:
+    if not broker:
         # Exit quietly: an unconfigured plugin must not spam the session.
+        # Only the broker URL can be missing now -- the agent id is derived from
+        # host and project directory, so it is never absent.
         log(
-            "not configured (need AGENT_NAME and BROKER_URL via /plugin, "
-            "~/.hollerback.json, or HOLLERBACK_AGENT/HOLLERBACK_BROKER). Exiting."
+            "no broker configured. Set BROKER_URL via the installer, "
+            "~/.hollerback.json, or HOLLERBACK_BROKER. Exiting."
         )
         return 0
 
-    # Identify this session so `list_peers` can say where the peer is working.
+    # Identify this session so `discover` can say where the peer is working.
     params = urllib.parse.urlencode(
         {
             "cwd": os.getcwd(),

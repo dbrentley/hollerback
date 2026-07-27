@@ -129,7 +129,7 @@ Break any of these and the failure is silent, not loud.
   real `kind='question'` row. `send_file` forwards the `request_id`, but
   `upload_file` only *stores* it; `store.mark_answered()` is called from `/v1/answer`
   and nowhere else. So the request stays open forever: `check_inbox` never clears,
-  `list_peers` shows a permanent debt, and `take_undelivered()` re-offers it on
+  `discover` shows a permanent debt, and `take_undelivered()` re-offers it on
   every attach. Only a `holler_back` on that id closes it.
 
 ## Running and testing
@@ -213,7 +213,7 @@ One JSON-RPC request per line in, one response line out.
 
 ```bash
 ./install-broker.sh                          # or --bind <private-ip> --port <n>
-./install.sh --agent backend --broker http://127.0.0.1:8850
+./install.sh --broker http://127.0.0.1:8850
 ```
 
 Then, in each session:
@@ -278,7 +278,7 @@ holds received files and self-ignores via a `.gitignore` written on first use.
   dispatch chain in `plugin/bin/mcp_server.py`, the notification wording in
   `listen.py::format_message` (it tells the peer which tool to call back with), the
   guidance in `plugin/skills/talking-to-your-peer/SKILL.md`, the tool table in
-  `README.md`, and the "9 hollerback tools" count in `README.md` / `install.sh`.
+  `README.md`, and the "ten hollerback tools" count in `README.md` / `install.sh`.
   Tool descriptions are prompt surface — `holler`'s text is what stops a session
   blocking on a reply.
 - **Plugin identity string** `hollerback@skills-dir` is duplicated in
