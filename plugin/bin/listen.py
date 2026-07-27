@@ -199,6 +199,9 @@ def main() -> int:
         }
     )
     url = f"{broker}/v1/stream/{urllib.parse.quote(agent)}?{params}"
+    # Log the id verbatim. It is percent-encoded in the URL (':' -> '%3A'), and
+    # anything reading it back out of there reports a name that does not exist.
+    log(f"identity: {agent}")
 
     backoff = RECONNECT_MIN
     announced_outage = False

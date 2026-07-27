@@ -177,7 +177,18 @@ echo "==> smoke test: connecting for 4s ..."
 ERRLOG="$(mktemp)"
 HOLLERBACK_BROKER="$BROKER" timeout 4 "$PY" "$DEST/bin/listen.py" >/dev/null 2>"$ERRLOG"
 if grep -q "connected to" "$ERRLOG"; then
-  WHO=$(grep -o '/v1/stream/[^?]*' "$ERRLOG" | head -1 | sed 's|/v1/stream/||')
+  # Prefer the plugin stating its own id. Fall back to decoding it out of the
+  # stream URL, because the plugin just installed may be an older build that does
+  # not log it -- and reporting '?' after a successful connect looks like a fault.
+  WHO=$("$PY" - "$ERRLOG" <<'WHOEOF'
+import pathlib, re, sys, urllib.parse
+err = pathlib.Path(sys.argv[1]).read_text(errors="replace")
+m = re.search(r"^\[holler\] identity: (.+)$", err, re.M)
+if not m:
+    m = re.search(r"/v1/stream/([^?\s]+)", err)
+print(urllib.parse.unquote(m.group(1).strip()) if m else "")
+WHOEOF
+)
   echo "    listener connected OK as '${WHO:-?}'"
 else
   echo "    listener did NOT connect:"; sed 's/^/    /' "$ERRLOG"
