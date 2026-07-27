@@ -36,6 +36,8 @@ for _stream in (sys.stdin, sys.stdout):
         pass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import urllib.parse  # noqa: E402
+
 from _common import clear_open_question, http_json, load_config, log  # noqa: E402
 
 PROTOCOL_VERSION = "2024-11-05"
@@ -213,7 +215,11 @@ TOOLS = [
     },
     {
         "name": "check_inbox",
-        "description": "Questions you have been asked and not answered, plus questions you asked that are still outstanding.",
+        "description": (
+            "Everything outstanding for this session: questions you have been "
+            "asked and not answered, questions you asked that have no answer yet, "
+            "and files a peer sent that you have not saved."
+        ),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -263,7 +269,7 @@ TOOLS = [
             "properties": {
                 "peer": {
                     "type": "string",
-                    "description": 'Peer name, or "*" to broadcast to everyone.',
+                    "description": 'Peer id from discover(), or any unique part of one. Use "*" to broadcast to everyone.',
                 },
                 "note": {"type": "string"},
             },
@@ -282,10 +288,11 @@ def _err(text: str) -> dict:
 
 
 def call_tool(name: str, args: dict) -> dict:
-    if not AGENT or not BROKER:
+    if not BROKER:
+        # AGENT cannot be missing -- it is derived. Only the broker URL can be.
         return _err(
-            "hollerback is not configured: this session has no AGENT_NAME/BROKER_URL. "
-            "Set them via /plugin, ~/.hollerback.json, or the HOLLERBACK_* env vars."
+            "hollerback has no broker configured. Set BROKER_URL via the installer, "
+            "/plugin, ~/.hollerback.json, or HOLLERBACK_BROKER."
         )
 
     try:
@@ -452,7 +459,15 @@ def call_tool(name: str, args: dict) -> dict:
             return _ok("\n".join(out))
 
         if name == "check_inbox":
-            r = http_json(f"{BROKER}/v1/pending/{AGENT}", None, TOKEN)
+            # AGENT lands in a URL PATH here, unlike every other call which puts it
+            # in a JSON body. It contains ':' by construction and can contain
+            # anything a directory name can, so it has to be encoded.
+            r = http_json(
+                f"{BROKER}/v1/pending/{urllib.parse.quote(AGENT, safe='')}",
+                None, TOKEN,
+            )
+            if not r.get("ok"):
+                return _err(f"could not reach the broker: {r.get('error', 'unknown error')}")
             owed = r.get("open_questions", [])
             waiting = r.get("awaiting_answers", [])
             files = r.get("pending_files", [])
@@ -478,6 +493,8 @@ def call_tool(name: str, args: dict) -> dict:
 
         if name == "discover":
             r = http_json(f"{BROKER}/v1/peers", None, TOKEN)
+            if not r.get("ok"):
+                return _err(f"could not reach the broker: {r.get('error', 'unknown error')}")
             rows = list(r.get("peers", []))
             # Always lead with your own id. It is derived, not configured, so this
             # is the only place a session can find out what peers will call it.

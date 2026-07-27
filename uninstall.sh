@@ -19,7 +19,7 @@ SCAN_DEPTH="${HOLLERBACK_SCAN_DEPTH:-6}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --purge-inboxes)   PURGE_INBOXES=1; shift ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -40,6 +40,11 @@ for name in hollerback agentshare; do
     echo "    removing $target"
     rm -rf "$target"; removed=1
   fi
+done
+
+# A marketplace install puts files under ~/.claude/plugins, not skills/.
+for d in "$HOME/.claude/plugins/hollerback" "$HOME/.claude/plugins/agentshare"; do
+  [ -e "$d" ] && { echo "    removing $d"; rm -rf "$d"; removed=1; }
 done
 
 PY="$(command -v python3 || command -v python || true)"
@@ -82,17 +87,20 @@ print(f"    settings.json: removed {gone + gone_ep or 'nothing'} (backup: {backu
 PYEOF
 fi
 
-for d in "$HOME/.cache/hollerback" "$HOME/.cache/agentshare"; do
+# XDG_CACHE_HOME is honoured by the plugin, so honour it here too.
+for d in "${XDG_CACHE_HOME:-$HOME/.cache}/hollerback" "${XDG_CACHE_HOME:-$HOME/.cache}/agentshare" \
+         "$HOME/.cache/hollerback" "$HOME/.cache/agentshare"; do
   [ -d "$d" ] && { echo "    removing state $d"; rm -rf "$d"; removed=1; }
 done
 for f in "$HOME/.hollerback.json" "$HOME/.agentshare.json"; do
   [ -f "$f" ] && { echo "    removing $f"; rm -f "$f"; removed=1; }
 done
 
-# Workspace identities (.hollerback/agent.json) are config this installer wrote,
-# not data the user created, so they go by default -- otherwise an uninstalled
-# machine keeps silently naming sessions. Received files in the same directory
-# are the user's and survive unless --purge-inboxes is given.
+# .hollerback/agent.json is a leftover from when installers wrote per-workspace
+# names. Nothing creates it now (ids are derived), but old installs have them and
+# load_config still reads them, so an uninstall that left them behind would keep
+# renaming sessions. Received files in the same directory are the user's and
+# survive unless --purge-inboxes is given.
 if [ "$PURGE_INBOXES" = "1" ]; then
   echo "    searching \$HOME for hollerback directories (inboxes included) ..."
   find "$HOME" -maxdepth "$SCAN_DEPTH" -type d \( -name .hollerback -o -name .agentshare \) \
@@ -114,6 +122,10 @@ EOT
   echo "    keeping received files (.hollerback/inbox/ in your projects)"
   echo "    re-run with --purge-inboxes to delete those too"
 fi
+
+for b in "$SETTINGS.bak.hollerback" "$SETTINGS.bak.hollerback-uninstall"; do
+  [ -f "$b" ] && echo "    kept settings backup: $b"
+done
 
 [ "$removed" = "0" ] && echo "    nothing was installed"
 

@@ -70,7 +70,7 @@ rm -rf "$PREFIX/broker"
 cp -R "$SRC/broker" "$PREFIX/broker"
 rm -rf "$PREFIX/broker/.venv"
 # plugin.zip + the installers are served from here, so they must travel too
-for f in plugin install.sh install-windows.ps1 uninstall.sh uninstall-windows.ps1; do
+for f in plugin install.sh install-windows.ps1 uninstall.sh uninstall-windows.ps1 uninstall-broker.sh; do
   [ -e "$SRC/$f" ] && cp -R "$SRC/$f" "$PREFIX/"
 done
 echo "    installed to $PREFIX"

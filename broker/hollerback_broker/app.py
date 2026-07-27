@@ -5,6 +5,8 @@ A message bus between concurrently-running Claude Code sessions. Two surfaces:
   POST /v1/ask             a session asks a peer a question (returns immediately)
   POST /v1/answer          a session answers a question it was asked
   POST /v1/note            fire-and-forget note, no reply expected
+  POST /v1/announce        a session records what it is, for discover()
+  POST /v1/forget          drop an agent that will never come back
   GET  /v1/stream/{agent}  long-lived SSE feed of that agent's messages
   GET  /v1/peers           who is online, where, and what they owe answers on
   GET  /v1/pending/{agent} open questions (used by the read-only permission hook)
@@ -160,6 +162,39 @@ def resolve_peer(target: str) -> tuple[str | None, list[dict]]:
     return None, hits or agents
 
 
+def _ambiguous(target: str, candidates: list) -> str:
+    listing = "\n".join(
+        f"  {a['name']} — {a.get('capabilities') or '(has not announced)'}"
+        for a in candidates
+    ) or "  (no sessions have ever connected)"
+    return (
+        f"{target!r} does not identify one peer. Call discover() and use an id "
+        f"from it. Closest matches:\n{listing}"
+    )
+
+
+async def forget(request: Request) -> JSONResponse:
+    """Drop an agent record outright.
+
+    Nothing expires here by design, so a session that will never return -- a
+    renamed directory, a machine that is gone, a smoke test -- otherwise sits in
+    discover() forever looking like something you could ask.
+    """
+    if not _authorized(request):
+        return _unauth()
+    b = await _body(request)
+    name = (b.get("agent") or "").strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "need 'agent'"}, status_code=400)
+    if _subscribers.get(name):
+        return JSONResponse(
+            {"ok": False, "error": f"{name!r} is connected right now; stop it first"},
+            status_code=409,
+        )
+    gone = store.forget_agent(name)
+    return JSONResponse({"ok": True, "agent": name, "existed": gone})
+
+
 async def announce(request: Request) -> JSONResponse:
     """Record what a session is, so peers arriving later can still find out.
 
@@ -218,20 +253,7 @@ async def ask(request: Request) -> JSONResponse:
 
     resolved, candidates = resolve_peer(to)
     if resolved is None:
-        listing = "\n".join(
-            f"  {a['name']} — {a.get('capabilities') or '(has not announced)'}"
-            for a in candidates
-        ) or "  (no sessions have ever connected)"
-        return JSONResponse(
-            {
-                "ok": False,
-                "error": (
-                    f"{to!r} does not identify one peer. Call discover() and use an "
-                    f"id from it. Closest matches:\n{listing}"
-                ),
-            },
-            status_code=404,
-        )
+        return JSONResponse({"ok": False, "error": _ambiguous(to, candidates)}, status_code=404)
     to = resolved
 
     agents = store.list_agents()
@@ -337,6 +359,12 @@ async def note(request: Request) -> JSONResponse:
 
     # "*" broadcasts to every known peer except the sender. Notes only -- a
     # broadcast question would have N recipients and no defined answerer.
+    if to != "*":
+        resolved, candidates = resolve_peer(to)
+        if resolved is None:
+            return JSONResponse({"ok": False, "error": _ambiguous(to, candidates)}, status_code=404)
+        to = resolved
+
     if to == "*":
         targets = [a["name"] for a in store.list_agents() if a["name"] != frm]
         if not targets:
@@ -396,6 +424,10 @@ async def upload_file(request: Request) -> JSONResponse:
         return JSONResponse(
             {"ok": False, "error": "need 'to', 'name' and 'data'"}, status_code=400
         )
+    resolved, candidates = resolve_peer(to)
+    if resolved is None:
+        return JSONResponse({"ok": False, "error": _ambiguous(to, candidates)}, status_code=404)
+    to = resolved
     try:
         data = base64.b64decode(b["data"], validate=True)
     except Exception:
@@ -471,6 +503,19 @@ async def stream(request: Request) -> Response:
 
     async def events():
         _subscribers[agent].add(queue)
+        # Ids are <host>:<dirname>, so two repos with the same folder name on one
+        # machine collide -- and the second session silently joins the first one's
+        # inbox. The broker is the only place that can see both.
+        prev = next((a for a in store.list_agents() if a["name"] == agent), None)
+        here = qp.get("cwd", "")
+        if prev and prev.get("cwd") and here and prev["cwd"] != here:
+            print(
+                f"[hollerback] WARNING: agent {agent!r} previously connected from "
+                f"{prev['cwd']!r} and is now connecting from {here!r}. Two workspaces "
+                f"share this id and will share an inbox; rename one directory or set "
+                f"HOLLERBACK_AGENT.",
+                file=sys.stderr, flush=True,
+            )
         store.touch_agent(
             agent,
             connected=True,
@@ -489,8 +534,10 @@ async def stream(request: Request) -> Response:
             queue.put_nowait(store.add_message(
                 to_agent=agent, from_agent=NOTICE_SENDER, kind="note",
                 text=(f"you are connected as '{agent}', but peers cannot see what you "
-                      f"do. Call announce() with a short description of this codebase "
-                      f"and what you own, so discover() can route questions to you."),
+                      f"do. If you have the announce() tool, call it with a short "
+                      f"description of this codebase and what you own, so discover() "
+                      f"can route questions to you. If you do not, your plugin predates "
+                      f"it -- re-run the installer."),
             ))
         try:
             yield b": hollerback connected\n\n"
@@ -635,6 +682,10 @@ async def uninstall_sh(request: Request) -> Response:
     return _serve_script("uninstall.sh", request)
 
 
+async def uninstall_broker_sh(request: Request) -> Response:
+    return _serve_script("uninstall-broker.sh", request)
+
+
 app = Starlette(
     routes=[
         Route("/", dashboard),
@@ -645,6 +696,7 @@ app = Starlette(
         Route("/v1/answer", answer, methods=["POST"]),
         Route("/v1/note", note, methods=["POST"]),
         Route("/v1/announce", announce, methods=["POST"]),
+        Route("/v1/forget", forget, methods=["POST"]),
         Route("/v1/send", send, methods=["POST"]),
         Route("/v1/pending/{agent}", pending),
         Route("/v1/message/{id}", message),
@@ -656,6 +708,7 @@ app = Starlette(
         Route("/install.sh", install_sh),
         Route("/uninstall.ps1", uninstall_ps1),
         Route("/uninstall.sh", uninstall_sh),
+        Route("/uninstall-broker.sh", uninstall_broker_sh),
     ],
     on_startup=[store.init],
 )

@@ -14,7 +14,7 @@
       & ([scriptblock]::Create((iwr https://raw.githubusercontent.com/dbrentley/hollerback/main/uninstall-windows.ps1 -UseBasicParsing).Content))
 #>
 [CmdletBinding()]
-param([switch]$PurgeInboxes, [switch]$KeepWorkspaces)
+param([switch]$PurgeInboxes)
 
 $ErrorActionPreference = "Stop"
 
@@ -32,12 +32,15 @@ $removed = $false
 Write-Host "==> uninstalling hollerback" -ForegroundColor Cyan
 
 # Current name and the pre-rename one, so an old install goes too.
+# skills/ is the installer route; plugins/ is the marketplace route.
 foreach ($name in @("hollerback", "agentshare")) {
-  $t = Join-Path $SkillsDir $name
+  foreach ($base in @($SkillsDir, (Join-Path $env:USERPROFILE ".claude\plugins"))) {
+  $t = Join-Path $base $name
   if (Test-Path $t) {
     Remove-Item -Recurse -Force $t
     Write-Host "    removed $t" -ForegroundColor Green
     $removed = $true
+  }
   }
 }
 
@@ -89,7 +92,7 @@ if ($PurgeInboxes) {
   Get-ChildItem -Path $env:USERPROFILE -Recurse -Directory -Force `
       -Include ".hollerback", ".agentshare" -ErrorAction SilentlyContinue -Depth 6 |
     ForEach-Object { Remove-Item -Recurse -Force $_.FullName; Write-Host "      deleted $($_.FullName)" -ForegroundColor DarkGray }
-} elseif (-not $KeepWorkspaces) {
+} else {
   Write-Host "    searching for workspace agent names ..." -ForegroundColor Cyan
   $any = $false
   Get-ChildItem -Path $env:USERPROFILE -Recurse -Directory -Force `
@@ -105,8 +108,6 @@ if ($PurgeInboxes) {
   if (-not $any) { Write-Host "      none found" -ForegroundColor DarkGray }
   Write-Host "    keeping received files (.hollerback\inbox\ in your projects)" -ForegroundColor DarkGray
   Write-Host "    re-run with -PurgeInboxes to delete those too" -ForegroundColor DarkGray
-} else {
-  Write-Host "    keeping workspace agent names and received files" -ForegroundColor DarkGray
 }
 
 if (-not $removed) { Write-Host "    nothing was installed" -ForegroundColor Yellow }

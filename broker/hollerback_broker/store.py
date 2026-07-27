@@ -371,6 +371,13 @@ def touch_agent(
         )
 
 
+def forget_agent(name: str) -> bool:
+    """Remove an agent record. Messages are left alone -- they are history."""
+    with _conn() as c:
+        cur = c.execute("DELETE FROM agents WHERE name=?", (name,))
+        return cur.rowcount > 0
+
+
 def list_agents() -> list[dict]:
     with _conn() as c:
         rows = c.execute("SELECT * FROM agents ORDER BY name").fetchall()

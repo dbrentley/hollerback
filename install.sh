@@ -23,7 +23,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --broker) BROKER="${2:-}"; shift 2 ;;
     --agent)  AGENT="${2:-}"; shift 2 ;;   # escape hatch; normally auto-derived
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -175,7 +175,13 @@ fi
 # --- 6. smoke test -----------------------------------------------------------
 echo "==> smoke test: connecting for 4s ..."
 ERRLOG="$(mktemp)"
-HOLLERBACK_BROKER="$BROKER" timeout 4 "$PY" "$DEST/bin/listen.py" >/dev/null 2>"$ERRLOG"
+# Under a scratch id, then forgotten. The listener derives its id from the CWD,
+# so testing under the real one registered a permanent agent named after whatever
+# directory the installer happened to be run from -- a peer that never exists but
+# shows up in discover() forever.
+SMOKE_ID="_install-smoketest"
+HOLLERBACK_BROKER="$BROKER" HOLLERBACK_AGENT="$SMOKE_ID" \
+  timeout 4 "$PY" "$DEST/bin/listen.py" >/dev/null 2>"$ERRLOG"
 if grep -q "connected to" "$ERRLOG"; then
   # Prefer the plugin stating its own id. Fall back to decoding it out of the
   # stream URL, because the plugin just installed may be an older build that does
@@ -189,11 +195,14 @@ if not m:
 print(urllib.parse.unquote(m.group(1).strip()) if m else "")
 WHOEOF
 )
-  echo "    listener connected OK as '${WHO:-?}'"
+  echo "    listener connected OK (real sessions derive <host>:<project-dir>)"
 else
   echo "    listener did NOT connect:"; sed 's/^/    /' "$ERRLOG"
 fi
 rm -f "$ERRLOG"
+# Best-effort: an older broker has no /v1/forget and simply 404s, which is fine.
+curl -fsS --max-time 5 -XPOST "$BROKER/v1/forget" \
+     -H 'content-type: application/json' -d "{\"agent\":\"$SMOKE_ID\"}" >/dev/null 2>&1 || true
 
 cat <<EOF
 

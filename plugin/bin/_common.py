@@ -127,13 +127,10 @@ def load_config() -> dict:
     except Exception as exc:  # noqa: BLE001
         log(f"could not read {local}: {exc}")
 
-    # Per-workspace identity, and the only thing that makes several named agents
-    # on one machine practical. Claude Code reads pluginConfigs from user scope
-    # ONLY -- never project settings -- so plugin config can hold exactly one
-    # AGENT_NAME per machine. Without this, a second agent means remembering an
-    # env var at every launch, and re-running the installer under a new name
-    # silently renames the first one. The name belongs to the workspace, which is
-    # how these sessions are actually organised: one repo, one role.
+    # Legacy per-workspace override. Nothing writes this any more -- ids are
+    # derived from host and directory -- but installs predating that do have the
+    # file, and silently ignoring it would rename those sessions out from under
+    # whoever set it. Kept as a read-only compatibility layer.
     proj = project_root() / PROJECT_CONFIG
     try:
         if proj.is_file():

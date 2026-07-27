@@ -7,18 +7,18 @@
     "name": "brent"
   },
   "userConfig": {
-    "AGENT_NAME": {
-      "type": "string",
-      "title": "This session's name",
-      "description": "How other sessions address this one, e.g. 'frontend' or 'backend'.",
-      "required": true
-    },
     "BROKER_URL": {
       "type": "string",
       "title": "Broker URL",
       "description": "Where the hollerback broker is running.",
       "default": "http://127.0.0.1:8850",
       "required": true
+    },
+    "AGENT_NAME": {
+      "type": "string",
+      "title": "Override this session's id (advanced, usually leave blank)",
+      "description": "Leave blank. Sessions identify themselves as <host>:<project-dir> automatically. Setting this pins ONE id for every workspace on this machine, so they would all share an inbox.",
+      "required": false
     }
   }
 }

@@ -98,8 +98,10 @@ iwr http://<broker>:8850/install.ps1 -OutFile $env:TEMP\hb.ps1
 powershell -ExecutionPolicy Bypass -File $env:TEMP\hb.ps1 -Broker http://<broker>:8850
 ```
 
-The plugin comes from the broker when it can be reached and from GitHub when it
-can't, so the install works even if the broker is down or not up yet.
+The plugin itself comes from GitHub, falling back to the broker if GitHub is
+unreachable — so the install works even when the broker is down or not up yet, and
+a current installer never pairs itself with whatever older plugin a long-running
+broker happens to be serving.
 
 Or through Claude Code's own plugin system:
 
@@ -139,9 +141,17 @@ curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/uninstall
 ```
 
 It removes the plugin, every `pluginConfigs` entry hollerback wrote (whichever way
-it was installed), local state, and any workspace agent names. **Files peers sent
-you are kept** — add `--purge-inboxes` / `-PurgeInboxes` to delete those too, or
-`--keep-workspaces` / `-KeepWorkspaces` to leave workspace names in place.
+it was installed), and local state. **Files peers sent you are kept** — add
+`--purge-inboxes` / `-PurgeInboxes` to delete those too.
+
+That leaves the broker running, since it is a separate service. To remove it as
+well:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/uninstall-broker.sh | bash
+```
+
+Message history and shared files are kept by default; `--purge-data` deletes them.
 
 ### Upgrading from `agentshare`
 

@@ -61,13 +61,42 @@ if (-not $py) { Write-Host "    No working Python 3 found on PATH." -ForegroundC
 Write-Host "    python: $py" -ForegroundColor Green
 
 # --- 3. download + extract --------------------------------------------------
+# GitHub first, broker second -- same order as install.sh. A broker is a
+# long-lived deployment that lags the repo, so preferring it pairs a current
+# installer with a stale plugin.
+$Repo = if ($env:HOLLERBACK_REPO) { $env:HOLLERBACK_REPO } else { "dbrentley/hollerback" }
+$Ref  = if ($env:HOLLERBACK_REF)  { $env:HOLLERBACK_REF }  else { "main" }
 $tmpZip = Join-Path $env:TEMP "hollerback-plugin.zip"
-Invoke-WebRequest -Uri "$Broker/v1/plugin.zip" -OutFile $tmpZip -TimeoutSec 30
+$srcDesc = ""
+try {
+  Invoke-WebRequest -Uri "https://codeload.github.com/$Repo/zip/refs/heads/$Ref" `
+      -OutFile $tmpZip -TimeoutSec 90 -UseBasicParsing
+  $srcDesc = "github ($Repo@$Ref)"
+} catch {
+  try {
+    Invoke-WebRequest -Uri "$Broker/v1/plugin.zip" -OutFile $tmpZip -TimeoutSec 30 -UseBasicParsing
+    $srcDesc = "broker"
+  } catch {
+    Write-Host "    could not fetch the plugin from GitHub or from $Broker" -ForegroundColor Red
+    exit 1
+  }
+}
 if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
-Expand-Archive -Path $tmpZip -DestinationPath $Dest -Force
+if ($srcDesc -eq "broker") {
+  Expand-Archive -Path $tmpZip -DestinationPath $Dest -Force
+} else {
+  # The GitHub zip is the whole repo; the plugin is one directory inside it.
+  $tmpX = Join-Path $env:TEMP ("hollerback-src-" + [guid]::NewGuid().ToString("N"))
+  Expand-Archive -Path $tmpZip -DestinationPath $tmpX -Force
+  $pluginDir = Get-ChildItem -Path $tmpX -Directory | ForEach-Object { Join-Path $_.FullName "plugin" } |
+               Where-Object { Test-Path $_ } | Select-Object -First 1
+  if (-not $pluginDir) { Write-Host "    zip has no plugin/ directory" -ForegroundColor Red; exit 1 }
+  Copy-Item -Path (Join-Path $pluginDir "*") -Destination $Dest -Recurse -Force
+  Remove-Item -Recurse -Force $tmpX
+}
 Remove-Item $tmpZip -Force
-Write-Host "    installed to $Dest" -ForegroundColor Green
+Write-Host "    installed to $Dest (from $srcDesc)" -ForegroundColor Green
 
 # --- 4. pin the monitor to the absolute interpreter -------------------------
 # Claude Code refuses to arm a monitor whose command contains ${user_config.*},
@@ -163,6 +192,10 @@ foreach ($pair in @(@($SettingsPath, $verifySettings), @($monitorsPath, $verifyM
 # --- 6. smoke test ----------------------------------------------------------
 Write-Host "==> smoke test: connecting for 4s ..." -ForegroundColor Cyan
 $env:HOLLERBACK_BROKER = $Broker
+# Scratch id, then forgotten -- otherwise the smoke test registers a permanent
+# agent named after whatever directory the installer was run from.
+$SmokeId = "_install-smoketest"
+$env:HOLLERBACK_AGENT = $SmokeId
 $p = Start-Process -FilePath $py `
       -ArgumentList @((Join-Path $Dest "bin\listen.py")) `
       -NoNewWindow -PassThru `
@@ -172,12 +205,17 @@ Start-Sleep -Seconds 4
 if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
 $err = Get-Content (Join-Path $env:TEMP "hollerback-smoke.err") -Raw -ErrorAction SilentlyContinue
 if ($err -match "connected to") {
-  $who = ([regex]::Match($err, '/v1/stream/([^?\s]+)')).Groups[1].Value
-  Write-Host "    listener connected OK as '$who'" -ForegroundColor Green
+  Write-Host "    listener connected OK (real sessions derive <host>:<project-dir>)" -ForegroundColor Green
 } else {
   Write-Host "    listener did NOT connect. stderr was:" -ForegroundColor Yellow
   Write-Host "    $err" -ForegroundColor Yellow
 }
+
+Remove-Item Env:\HOLLERBACK_AGENT -ErrorAction SilentlyContinue
+try {
+  Invoke-RestMethod -Uri "$Broker/v1/forget" -Method Post -TimeoutSec 5 `
+    -ContentType "application/json" -Body (@{agent=$SmokeId} | ConvertTo-Json) | Out-Null
+} catch { }   # older brokers have no /v1/forget; harmless
 
 Write-Host ""
 Write-Host "Done. Nothing to name -- each session is <host>:<project-dir>." -ForegroundColor Cyan

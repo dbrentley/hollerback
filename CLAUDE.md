@@ -116,13 +116,13 @@ Break any of these and the failure is silent, not loud.
   their own `kind`, but an older `listen.py` has no branch for an unknown kind and
   falls straight through to the *question* formatter — the peer would then try to
   answer a system message. Every shipped client understands `note`.
-- **The auto-allow window is machine-global, keyed by agent name only.**
+- **The auto-allow window is keyed by agent id, and the hook is user-scope.**
   `_common.state_path()` builds `~/.cache/hollerback/open_questions.<agent>.json`
-  with no session id and no project path, and the `PreToolUse` hook is user-scope,
-  so it fires in *every* session on the box. One question arriving anywhere opens
-  the 900s (`ANSWER_WINDOW_SECS`) read-only auto-allow everywhere that resolves to
-  the same agent name — including repos that never opted into hollerback. It also
-  allows the read regardless of path; `resolve_in_project()` constrains only
+  with no session id, and the `PreToolUse` hook runs in *every* session on the box.
+  Since ids now embed the project directory, the blast radius is normally one
+  workspace — but two directories with the same basename derive the same id and
+  therefore share the window, as does anything pinned with `HOLLERBACK_AGENT`. It
+  also allows the read regardless of path; `resolve_in_project()` constrains only
   `send_file`/`get_file`, not what the hook permits.
 - **A `request_file` satisfied by `send_file` is never marked answered.**
   `request_file` has no endpoint of its own — it POSTs to `/v1/ask` and creates a
@@ -223,7 +223,7 @@ Then, in each session:
   notifications and the old tool list, which looks like a half-applied bug.
 - **The workspace must be trusted**, or monitors are skipped with no error at all.
 - **Monitors don't arm in `-p`/headless mode.** Test interactively.
-- Status line should show `1 monitor`, and there should be **9** hollerback tools.
+- Status line should show `1 monitor`, and there should be **10** hollerback tools.
 - **Nothing is named, anywhere.** An agent id is `<host>:<project-dir>`, derived by
   `_common.default_agent_name()`. This exists because `pluginConfigs` is user-scope
   only, so any name stored there is one-per-machine and collides the moment you want
@@ -289,9 +289,9 @@ holds received files and self-ignores via a `.gitignore` written on first use.
   `hollerback@hollerback` instead. `_candidate_sources()` accepts `@skills-dir`
   first and then any `hollerback@*` key, which is what makes the marketplace route
   and forks work — reading only one of them produced the worst failure in the
-  project: plugin loads, `1 monitor` shows, all 9 tools appear, and every tool
-  answers *"hollerback is not configured"*. **The uninstallers still strip only the
-  `@skills-dir` key**, so a marketplace-installed config survives uninstall.
+  project: plugin loads, `1 monitor` shows, all 10 tools appear, and every tool
+  answers *"hollerback is not configured"*. Both uninstallers match on the plugin
+  half of the id (`hollerback@*`), so marketplace and fork configs are removed too.
 - **Config precedence** (`_common.load_config`): env `HOLLERBACK_*` >
   `<project>/.hollerback/agent.json` > `~/.hollerback.json` >
   `pluginConfigs["hollerback@*"].options` in `~/.claude/settings.json`. The project
