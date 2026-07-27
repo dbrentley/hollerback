@@ -23,6 +23,8 @@ import io
 import json
 import os
 import pathlib
+import re
+import sys
 import time
 import zipfile
 from collections import defaultdict
@@ -476,11 +478,24 @@ async def plugin_zip(request: Request) -> Response:
 # and a "CANNOT REACH BROKER" failure — while following the instructions exactly.
 # The broker serves these scripts, so it knows the URL the caller reached it on: stamp that in as the
 # default. Explicit --broker/-Broker still wins, since it overwrites the default at parse time.
-_BROKER_DEFAULTS = {
-    "install.sh": 'BROKER="http://127.0.0.1:8850"',
-    "uninstall.sh": 'BROKER="http://127.0.0.1:8850"',
-    "install-windows.ps1": '[string]$Broker    = "http://127.0.0.1:8850",',
-    "uninstall-windows.ps1": '[string]$Broker    = "http://127.0.0.1:8850",',
+_DEFAULT_BROKER_URL = "http://127.0.0.1:8850"
+
+# Anchored on the ASSIGNMENT, not on a whole exact line. Matching the full line
+# by substring already broke once, silently: install.sh's default became
+# BROKER="${HOLLERBACK_BROKER:-http://127.0.0.1:8850}" and the old literal stopped
+# matching, so every piped install silently got the loopback default back. The
+# URL also appears in usage comments, so a bare replace of the first occurrence
+# would rewrite documentation instead of the default.
+# uninstall.sh / uninstall-windows.ps1 are absent on purpose: they contact no
+# broker and have no such default. They were listed here and never matched.
+_BROKER_ANCHORS = {
+    "install.sh": re.compile(
+        r"^(BROKER=[^\n]*?)" + re.escape(_DEFAULT_BROKER_URL), re.MULTILINE
+    ),
+    "install-windows.ps1": re.compile(
+        r'^(\s*\[string\]\$Broker\s*=\s*")' + re.escape(_DEFAULT_BROKER_URL),
+        re.MULTILINE,
+    ),
 }
 
 
@@ -501,11 +516,21 @@ def _serve_script(name: str, request: Request | None = None) -> Response:
         return JSONResponse({"ok": False, "error": f"{name} not found"}, status_code=404)
 
     text = script.read_text()
-    default = _BROKER_DEFAULTS.get(name)
+    anchor = _BROKER_ANCHORS.get(name)
     base = _public_base_url(request) if request is not None else None
 
-    if default and base and default in text:
-        text = text.replace(default, default.replace("http://127.0.0.1:8850", base), 1)
+    if anchor is not None and base:
+        text, n = anchor.subn(lambda m: m.group(1) + base, text, count=1)
+        if n == 0:
+            # Say so instead of quietly serving a script that points at loopback.
+            # This is the only signal that the anchor has drifted from the file.
+            print(
+                f"[hollerback] WARNING: {name} has no recognisable broker default; "
+                f"serving it unmodified, so a piped install will fall back to "
+                f"{_DEFAULT_BROKER_URL} unless --broker is passed explicitly.",
+                file=sys.stderr,
+                flush=True,
+            )
 
     return Response(text, media_type="text/plain; charset=utf-8")
 
