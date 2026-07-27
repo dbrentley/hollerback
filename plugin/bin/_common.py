@@ -12,6 +12,21 @@ import urllib.request
 
 PLUGIN_SOURCE = "hollerback@skills-dir"
 
+# Where a workspace declares which agent it is. Lives inside .hollerback/ because
+# that directory already carries a self-written .gitignore -- a session's name is
+# personal, not something to commit into a shared repo.
+PROJECT_CONFIG = ".hollerback/agent.json"
+
+
+def project_root() -> pathlib.Path:
+    """The workspace this session is attached to.
+
+    stdio MCP servers are handed CLAUDE_PROJECT_DIR by the host. Monitors are not,
+    but they are spawned with the project as their cwd -- verified against a live
+    broker, which recorded exactly each session's directory. Both land here.
+    """
+    return pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+
 
 def _candidate_sources(configs: dict) -> list:
     """Every plugin-source key that could hold this plugin's config, best first.
@@ -110,6 +125,23 @@ def load_config() -> dict:
                     cfg[key] = data[key]
     except Exception as exc:  # noqa: BLE001
         log(f"could not read {local}: {exc}")
+
+    # Per-workspace identity, and the only thing that makes several named agents
+    # on one machine practical. Claude Code reads pluginConfigs from user scope
+    # ONLY -- never project settings -- so plugin config can hold exactly one
+    # AGENT_NAME per machine. Without this, a second agent means remembering an
+    # env var at every launch, and re-running the installer under a new name
+    # silently renames the first one. The name belongs to the workspace, which is
+    # how these sessions are actually organised: one repo, one role.
+    proj = project_root() / PROJECT_CONFIG
+    try:
+        if proj.is_file():
+            data = json.loads(proj.read_text(encoding="utf-8-sig"))
+            for key in cfg:
+                if data.get(key):
+                    cfg[key] = data[key]
+    except Exception as exc:  # noqa: BLE001
+        log(f"could not read {proj}: {exc}")
 
     cfg["agent"] = os.environ.get("HOLLERBACK_AGENT") or cfg["agent"]
     cfg["broker"] = os.environ.get("HOLLERBACK_BROKER") or cfg["broker"]

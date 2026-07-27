@@ -189,8 +189,25 @@ else is using — there's no registry to update, and `list_peers()` discovers it
 Two things to know:
 
 - Plugin config is **user-scope only** (Claude Code does not read `pluginConfigs`
-  from project settings), so every session on a machine shares one name unless
-  you override per launch: `HOLLERBACK_AGENT=docs claude`
+  from project settings), so a machine has exactly one *default* name. Give a
+  workspace its own name instead — that is what a second agent on one machine
+  looks like:
+
+  ```bash
+  cd ~/work/optimizer
+  curl -fsSL http://<broker>:8850/install.sh | bash -s -- \
+      --agent power-optimizer --broker http://<broker>:8850 --here
+  ```
+  ```powershell
+  cd C:\work\optimizer
+  powershell -File $env:TEMP\hb.ps1 -AgentName power-optimizer -Broker http://<broker>:8850 -Here
+  ```
+
+  That writes `.hollerback/agent.json`, which outranks the machine default, so any
+  session opened there connects under that name with nothing to remember at launch.
+  `HOLLERBACK_AGENT=docs claude` still works for a one-off. Re-running an installer
+  with a new name and **no** `--here` refuses rather than renaming your existing
+  agent; pass `--default` if replacing it is what you actually want.
 - **Two sessions sharing a name both receive that name's traffic**, and either
   can drain the other's backlog. Give each one its own name.
 

@@ -5,19 +5,35 @@
 # scope silently strips monitors), and points it at the broker under a name you
 # choose. Re-run any time to update.
 #
-#   curl -fsSL http://100.64.0.5:8850/install.sh | bash -s -- --agent docs
-#   ./install.sh --agent docs --broker http://100.64.0.5:8850
+#   # first agent on this machine -- becomes the machine default
+#   curl -fsSL http://100.64.0.5:8850/install.sh | bash -s -- --agent backend
+#
+#   # ANOTHER agent on the SAME machine: name the workspace, not the machine
+#   cd ~/work/optimizer && ./install.sh --agent power-optimizer --here
+#
+#   # deliberately change the machine default
+#   ./install.sh --agent docs --default
+#
+# Claude Code reads plugin config from user scope only, so a machine has exactly
+# one default AGENT_NAME. --here writes .hollerback/agent.json in a workspace,
+# which outranks it, so every repo can be its own agent with nothing to remember
+# at launch. Re-running with a new name will NOT silently rename an existing one.
 set -uo pipefail
 
 BROKER="http://127.0.0.1:8850"
 AGENT=""
 PLUGIN_SOURCE="hollerback@skills-dir"
+PROJECT=""        # non-empty => write workspace config there
+SET_DEFAULT=0     # 1 => intentionally overwrite the machine default
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --agent)  AGENT="${2:-}"; shift 2 ;;
-    --broker) BROKER="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    --agent)   AGENT="${2:-}"; shift 2 ;;
+    --broker)  BROKER="${2:-}"; shift 2 ;;
+    --here)    PROJECT="$PWD"; shift ;;
+    --project) PROJECT="${2:-}"; shift 2 ;;
+    --default) SET_DEFAULT=1; shift ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -72,9 +88,35 @@ PYEOF
 fi
 
 # --- 4. config ---------------------------------------------------------------
-"$PY" - "$SETTINGS" "$PLUGIN_SOURCE" "$AGENT" "$BROKER" <<'PYEOF'
-import json, os, pathlib, sys
-settings, source, agent, broker = sys.argv[1:5]
+"$PY" - "$SETTINGS" "$PLUGIN_SOURCE" "$AGENT" "$BROKER" "$PROJECT" "$SET_DEFAULT" <<'PYEOF'
+import json, pathlib, sys
+settings, source, agent, broker, project, set_default = sys.argv[1:7]
+set_default = set_default == "1"
+
+if project:
+    # Workspace identity. Beats the machine default in load_config(), so several
+    # named agents can share a machine without an env var at every launch.
+    root = pathlib.Path(project).expanduser().resolve()
+    if not root.is_dir():
+        print(f"    --project {root} is not a directory"); raise SystemExit(1)
+    d = root / ".hollerback"
+    d.mkdir(parents=True, exist_ok=True)
+    # Received files land here too; a name is personal, so never let it be committed.
+    gi = d / ".gitignore"
+    if not gi.exists():
+        gi.write_text("# hollerback local state; not part of the repo\n*\n")
+    target = d / "agent.json"
+    target.write_text(
+        json.dumps({"agent": agent, "broker": broker}, indent=2) + "\n", encoding="utf-8")
+    # Verify shape, not just that we wrote something -- a file that parses but has
+    # the wrong shape is exactly how this project shipped a broken monitors.json.
+    check = json.loads(target.read_text(encoding="utf-8-sig"))
+    assert isinstance(check, dict), "agent.json must be a JSON object"
+    assert check.get("agent") == agent, "agent.json did not record the name"
+    print(f"    workspace named: {target} (agent={agent})")
+    print(f"    verified: agent.json -- ok {check['agent']}")
+    raise SystemExit(0)
+
 p = pathlib.Path(settings)
 p.parent.mkdir(parents=True, exist_ok=True)
 data = {}
@@ -87,13 +129,30 @@ if p.is_file():
     except Exception as exc:
         print(f"    existing settings.json unparseable ({exc}); refusing to clobber it")
         raise SystemExit(1)
+
+current = (data.get("pluginConfigs", {}).get(source, {}).get("options", {})
+           .get("AGENT_NAME", ""))
+if current and current != agent and not set_default:
+    # Silently renaming the existing agent is the one thing this must never do:
+    # the old session keeps answering under a name nobody is addressing any more.
+    print(f"    REFUSING: this machine's default agent is already '{current}'.")
+    print(f"    Overwriting it would rename that session on its next restart.")
+    print(f"    To add '{agent}' alongside it, name a workspace instead:")
+    print(f"        cd <that project> && install.sh --agent {agent} --here")
+    print(f"    Or to genuinely replace the default:")
+    print(f"        install.sh --agent {agent} --default")
+    raise SystemExit(2)
+
 data.setdefault("pluginConfigs", {})[source] = {
     "options": {"AGENT_NAME": agent, "BROKER_URL": broker}
 }
 p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-print(f"    settings.json updated (AGENT_NAME={agent})")
+what = "machine default changed" if current and current != agent else "settings.json updated"
+print(f"    {what} (AGENT_NAME={agent})")
 PYEOF
-[ $? -ne 0 ] && exit 1
+rc=$?
+[ $rc -eq 2 ] && exit 2
+[ $rc -ne 0 ] && exit 1
 
 # --- 5. verify shape, not just syntax ---------------------------------------
 "$PY" - "$DEST/monitors/monitors.json" <<'PYEOF'
@@ -117,12 +176,25 @@ else
 fi
 rm -f "$ERRLOG"
 
-cat <<EOF
+if [ -n "$PROJECT" ]; then
+  cat <<EOF
 
-Done. Now:
+Done. '$AGENT' is the agent for $PROJECT.
+Start a NEW session with that directory as the workspace and it connects under
+that name -- nothing to remember at launch.
+EOF
+else
+  cat <<EOF
+
+Done. '$AGENT' is this machine's default agent.
+EOF
+fi
+
+cat <<EOF
   * START A NEW SESSION -- /reload-plugins does NOT respawn the MCP server.
   * The workspace must be TRUSTED, or monitors are silently skipped.
   * Status line should show '1 monitor'; you should have 9 hollerback tools.
-  * Running several sessions on this machine? Override per launch:
-        HOLLERBACK_AGENT=other-name claude
+  * Another agent on this machine? Name its workspace, don't rename the machine:
+        cd <that project> && install.sh --agent <other-name> --here
+    (a one-off still works: HOLLERBACK_AGENT=other-name claude)
 EOF

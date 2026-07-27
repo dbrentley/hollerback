@@ -24,9 +24,13 @@ every failure and its *actual* root cause, and what was proven versus assumed. T
 original session was recorded under the project's pre-rename path (`agentshare`),
 so `/resume` cannot reach it from here — that document is the only copy.
 
-**Nothing is installed or running anywhere.** The dev machine was torn down at the
-end of the build session, SQLite history included, so there is no live system to
-test against — stand one up from the working tree (below) before debugging anything.
+**There is a live deployment.** A broker runs as a systemd user service from
+`~/.local/share/hollerback` (not this checkout), with real sessions attached. So:
+never test against it — stand up a scratch broker from the working tree on a spare
+port with `HOLLERBACK_DB` pointed at a temp file, and **never `pkill -f
+hollerback_broker`**, which matches the live one. Kill test brokers by the exact PID
+you started. Broker changes reach the running service only after re-running
+`install-broker.sh`; plugin changes need a reinstall plus a session restart.
 
 ## The mechanism that makes it work
 
@@ -220,10 +224,17 @@ Then, in each session:
 - **The workspace must be trusted**, or monitors are skipped with no error at all.
 - **Monitors don't arm in `-p`/headless mode.** Test interactively.
 - Status line should show `1 monitor`, and there should be **9** hollerback tools.
-- Several sessions on one machine share one name unless overridden per launch:
-  `HOLLERBACK_AGENT=docs claude` (plugin config is user-scope only; Claude Code does
-  not read `pluginConfigs` from project settings). Two sessions on the same name
-  both receive that name's traffic and either can drain the other's backlog.
+- **Several agents on one machine come from the workspace, not the machine.** Claude
+  Code reads `pluginConfigs` from user scope only, so plugin config holds exactly one
+  `AGENT_NAME` per machine. `.hollerback/agent.json` in a project outranks it, which
+  is what `install.sh --agent NAME --here` writes — so a repo is its own agent with
+  nothing to remember at launch. `HOLLERBACK_AGENT=docs claude` still works for a
+  one-off. Two sessions on the same name both receive that name's traffic and either
+  can drain the other's backlog, so never let two workspaces claim one name.
+- **The installers refuse to rename an existing agent.** Re-running with a different
+  name used to overwrite the machine default, silently renaming a live session on its
+  next restart. It now exits 2 and points at `--here` / `-Here`; `--default` /
+  `-Default` is the explicit opt-in to actually replace it.
 
 > **Nearly every "bug" in this project's history was a stale child process.**
 > Monitors and MCP servers outlive edits to their own source. Before debugging a
@@ -295,8 +306,10 @@ holds received files and self-ignores via a `.gitignore` written on first use.
   answers *"hollerback is not configured"*. **The uninstallers still strip only the
   `@skills-dir` key**, so a marketplace-installed config survives uninstall.
 - **Config precedence** (`_common.load_config`): env `HOLLERBACK_*` >
-  `~/.hollerback.json` > `pluginConfigs["hollerback@skills-dir"].options` in
-  `~/.claude/settings.json`. Both *file* reads use `utf-8-sig` because PowerShell
+  `<project>/.hollerback/agent.json` > `~/.hollerback.json` >
+  `pluginConfigs["hollerback@*"].options` in `~/.claude/settings.json`. The project
+  layer resolves via `CLAUDE_PROJECT_DIR` when set (stdio MCP) and cwd otherwise
+  (the monitor, which is spawned with the workspace as its cwd). Both *file* reads use `utf-8-sig` because PowerShell
   5.1 writes a BOM (the env layer needs no decoding). Note `_read_state()` in the
   same file deliberately omits the encoding — it reads our own cache, not a
   PowerShell-written config.

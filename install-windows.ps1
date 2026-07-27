@@ -8,12 +8,26 @@
   Re-run this any time to update. Usage:
       powershell -ExecutionPolicy Bypass -File install-windows.ps1
       powershell -ExecutionPolicy Bypass -File install-windows.ps1 -AgentName frontend
+
+  ANOTHER agent on the SAME machine -- name the workspace, not the machine:
+      cd C:\work\optimizer
+      powershell -File install-windows.ps1 -AgentName power-optimizer -Here
+
+  Claude Code reads plugin config from user scope only, so a machine has exactly
+  one default AgentName. -Here writes .hollerback\agent.json in a workspace,
+  which outranks it, so every repo can be its own agent with nothing to remember
+  at launch. Re-running with a new name will NOT silently rename an existing one;
+  pass -Default if replacing the machine default is genuinely what you want.
 #>
 [CmdletBinding()]
 param(
   [string]$Broker    = "http://127.0.0.1:8850",
-  [string]$AgentName = "frontend"
+  [string]$AgentName = "frontend",
+  [string]$Project   = "",
+  [switch]$Here,
+  [switch]$Default
 )
+if ($Here) { $Project = (Get-Location).Path }
 
 $ErrorActionPreference = "Stop"
 $PluginSource = "hollerback@skills-dir"
@@ -89,7 +103,50 @@ $monitorsJson = @"
 Write-JsonNoBom -Path $monitorsPath -Json $monitorsJson
 Write-Host "    monitor command pinned to $py" -ForegroundColor Green
 
-# --- 5. write plugin config into settings.json ------------------------------
+# --- 5. write plugin config -------------------------------------------------
+if ($Project) {
+  # Workspace identity, which outranks the machine default in load_config().
+  # This is what lets several named agents share one machine.
+  $root = (Resolve-Path $Project -ErrorAction SilentlyContinue)
+  if (-not $root) { Write-Host "    -Project '$Project' is not a directory" -ForegroundColor Red; exit 1 }
+  $hb = Join-Path $root.Path ".hollerback"
+  New-Item -ItemType Directory -Force -Path $hb | Out-Null
+  $gi = Join-Path $hb ".gitignore"
+  if (-not (Test-Path $gi)) {
+    Write-JsonNoBom -Path $gi -Json "# hollerback local state; not part of the repo`n*`n"
+  }
+  $cfg = [ordered]@{ agent = $AgentName; broker = $Broker }
+  $agentJson = Join-Path $hb "agent.json"
+  Write-JsonNoBom -Path $agentJson -Json ($cfg | ConvertTo-Json)
+  Write-Host "    workspace named: $agentJson (agent=$AgentName)" -ForegroundColor Green
+
+  # Verify with the SAME python the plugin uses, and check shape rather than mere
+  # parseability -- ConvertTo-Json and Set-Content have both produced files here
+  # that parsed fine and were still wrong.
+  $verifyAgent = @"
+import json,sys
+d=json.load(open(sys.argv[1],encoding='utf-8-sig'))
+assert isinstance(d,dict), 'agent.json must be a JSON object, got %s' % type(d).__name__
+assert d.get('agent'), 'agent name missing'
+print('ok', d['agent'])
+"@
+  $tmpPy = Join-Path $env:TEMP ("hollerback-verify-" + [guid]::NewGuid().ToString("N") + ".py")
+  Write-JsonNoBom -Path $tmpPy -Json $verifyAgent
+  $check = & $py $tmpPy $agentJson 2>&1
+  Remove-Item $tmpPy -Force -ErrorAction SilentlyContinue
+  if ($LASTEXITCODE -ne 0 -or $check -notmatch "ok") {
+    Write-Host "    INVALID $agentJson" -ForegroundColor Red
+    Write-Host "    $check" -ForegroundColor Red
+    exit 1
+  }
+  Write-Host "    verified: agent.json -- $check" -ForegroundColor Green
+  Write-Host ""
+  Write-Host "Done. '$AgentName' is the agent for $($root.Path)." -ForegroundColor Cyan
+  Write-Host "  * START A NEW SESSION with that folder as the workspace." -ForegroundColor White
+  Write-Host "  * It must be TRUSTED, or monitors are silently skipped." -ForegroundColor White
+  exit 0
+}
+
 if (Test-Path $SettingsPath) {
   # Don't clobber a good backup with a bad file on a repeat run.
   if (-not (Test-Path "$SettingsPath.bak.hollerback")) {
@@ -104,6 +161,22 @@ if (Test-Path $SettingsPath) {
 } else {
   New-Item -ItemType Directory -Force -Path (Split-Path $SettingsPath) | Out-Null
   $settings = [PSCustomObject]@{}
+}
+
+$existing = ""
+if ($settings.PSObject.Properties.Name -contains "pluginConfigs" -and
+    $settings.pluginConfigs.PSObject.Properties.Name -contains $PluginSource) {
+  $existing = $settings.pluginConfigs.$PluginSource.options.AGENT_NAME
+}
+if ($existing -and $existing -ne $AgentName -and -not $Default) {
+  # Never silently rename an existing agent: the old session would keep answering
+  # under a name nobody is addressing any more.
+  Write-Host "    REFUSING: this machine's default agent is already '$existing'." -ForegroundColor Red
+  Write-Host "    Overwriting it would rename that session on its next restart." -ForegroundColor Red
+  Write-Host "    To add '$AgentName' alongside it, name a workspace instead:" -ForegroundColor Yellow
+  Write-Host "        cd <that project>; powershell -File install-windows.ps1 -AgentName $AgentName -Here" -ForegroundColor Yellow
+  Write-Host "    Or to genuinely replace the default, pass -Default." -ForegroundColor Yellow
+  exit 2
 }
 
 $options = [ordered]@{ AGENT_NAME = $AgentName; BROKER_URL = $Broker }
