@@ -9,7 +9,7 @@
 
       & ([scriptblock]::Create((iwr https://raw.githubusercontent.com/dbrentley/hollerback/main/install-windows.ps1 -UseBasicParsing).Content)) -Broker http://100.64.0.5:8850
 
-  There is nothing to name. Each session identifies itself as <host>/<project-dir>
+  There is nothing to name. Each session identifies itself as <host>:<project-dir>
   and says what it does at runtime via the announce() tool, which peers read back
   with discover(). One install per machine; every workspace on it is its own agent.
 #>
@@ -180,7 +180,7 @@ if ($err -match "connected to") {
 }
 
 Write-Host ""
-Write-Host "Done. Nothing to name -- each session is <host>/<project-dir>." -ForegroundColor Cyan
+Write-Host "Done. Nothing to name -- each session is <host>:<project-dir>." -ForegroundColor Cyan
 Write-Host "  * START A NEW SESSION -- /reload-plugins does NOT respawn the MCP server." -ForegroundColor White
 Write-Host "  * The workspace must be TRUSTED, or monitors are silently skipped." -ForegroundColor White
 Write-Host "  * Status line should show '1 monitor'; you should have 10 hollerback tools." -ForegroundColor White

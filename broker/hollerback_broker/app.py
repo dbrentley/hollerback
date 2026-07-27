@@ -135,7 +135,7 @@ async def _notify_departure(agent: str) -> None:
 def resolve_peer(target: str) -> tuple[str | None, list[dict]]:
     """Map what the caller typed onto a real agent id.
 
-    Ids are mechanical now (<host>/<project-dir>), so nobody types them from
+    Ids are mechanical now (<host>:<project-dir>), so nobody types them from
     memory -- they come out of discover(). Accept an exact id, or any unique
     substring of an id or of what that agent said it does, and report the
     candidates instead of guessing when it is ambiguous. Guessing here would

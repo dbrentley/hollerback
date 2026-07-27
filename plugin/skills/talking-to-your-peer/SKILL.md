@@ -11,7 +11,7 @@ instead of guessing or making the user relay.
 
 ## Say what you are, once
 
-Nobody names these sessions. Each one is `<host>/<project-dir>` — derived, not
+Nobody names these sessions. Each one is `<host>:<project-dir>` — derived, not
 configured — so an id tells a peer *where* you are and nothing about what you
 know. **Call `announce()` early**, with what this codebase is and what you can
 answer authoritatively:
@@ -34,7 +34,7 @@ before you address anyone: ids are derived from host and directory, so you canno
 guess them, and the set changes as sessions come and go.
 
 Address a peer by its id or any unique part of one — `holler(peer="optimize", …)`
-matches `ada/optimize`. Matching also looks at what a peer announced, so
+matches `ada:optimize`. Matching also looks at what a peer announced, so
 `peer="duty-cycle solver"` finds whoever said that. If it is ambiguous you get the
 candidates back instead of a guess; re-send with a specific id.
 
@@ -44,7 +44,7 @@ candidates back instead of a guess; re-send with a specific id.
 immediately**. It does not block, and you must not wait for it.
 
 ```
-holler(peer="ada/daoc",
+holler(peer="ada:daoc",
          question="How does the order service decide idempotency for POST /orders? I need the exact header name.",
          context="wiring the retry path in src/api/orders.ts")
 ```

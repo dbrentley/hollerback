@@ -158,12 +158,17 @@ def default_agent_name() -> str:
     Nothing should have to be named at install time. A name typed into an
     installer is one per machine, so a second session there either collides or
     forces a rename, and the name goes stale the moment that session moves to
-    another repo. <host>/<project-dir> needs no configuration, is stable for as
+    another repo. <host>:<project-dir> needs no configuration, is stable for as
     long as the session stays put, and is distinct per workspace by construction.
 
     It is deliberately mechanical, not descriptive -- what a session *does* is
     announce()d separately and read back by discover(), so the id never has to
     carry meaning.
+
+    Separated by ':' rather than '/'. The id is a path segment in
+    /v1/stream/{agent}, and a slash splits it into two segments and 404s the
+    route -- percent-encoding does not save it either, since ASGI decodes %2F
+    back to a separator before routing.
     """
     try:
         host = socket.gethostname().split(".")[0].strip() or "unknown-host"
@@ -174,7 +179,7 @@ def default_agent_name() -> str:
     if root == pathlib.Path.home():
         name = "home"
     safe = lambda s: "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in s)  # noqa: E731
-    return f"{safe(host)}/{safe(name)}"
+    return f"{safe(host)}:{safe(name)}"
 
 
 # --- open-question state ----------------------------------------------------

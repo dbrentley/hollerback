@@ -224,7 +224,7 @@ Then, in each session:
 - **The workspace must be trusted**, or monitors are skipped with no error at all.
 - **Monitors don't arm in `-p`/headless mode.** Test interactively.
 - Status line should show `1 monitor`, and there should be **9** hollerback tools.
-- **Nothing is named, anywhere.** An agent id is `<host>/<project-dir>`, derived by
+- **Nothing is named, anywhere.** An agent id is `<host>:<project-dir>`, derived by
   `_common.default_agent_name()`. This exists because `pluginConfigs` is user-scope
   only, so any name stored there is one-per-machine and collides the moment you want
   two agents on one box — which the installers used to handle with a rename-refusal

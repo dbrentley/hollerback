@@ -8,7 +8,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/install.sh \
 #     | bash -s -- --broker http://100.64.0.5:8850
 #
-# There is nothing to name. Each session identifies itself as <host>/<project-dir>
+# There is nothing to name. Each session identifies itself as <host>:<project-dir>
 # and says what it does at runtime via the announce() tool, which peers read back
 # with discover(). One install per machine; every workspace on it is its own agent.
 set -uo pipefail
@@ -179,7 +179,7 @@ rm -f "$ERRLOG"
 
 cat <<EOF
 
-Done. Nothing to name -- each session identifies itself as <host>/<project-dir>.
+Done. Nothing to name -- each session identifies itself as <host>:<project-dir>.
   * START A NEW SESSION -- /reload-plugins does NOT respawn the MCP server.
   * The workspace must be TRUSTED, or monitors are silently skipped.
   * Status line should show '1 monitor'; you should have 10 hollerback tools.
