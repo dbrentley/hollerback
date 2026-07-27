@@ -127,7 +127,14 @@ FinalKillSignal=SIGKILL
 WantedBy=default.target
 EOF
   systemctl --user daemon-reload
-  systemctl --user enable --now hollerback-broker.service >/dev/null 2>&1 && STARTED=1
+  # enable --now is a NO-OP on an already-active unit: it enables something
+  # already enabled and starts something already started, so an upgrade copied
+  # new code into place and left the OLD process serving it. That is how a
+  # freshly-installed broker kept reporting itself as the previous version.
+  # restart covers both cases -- it starts a stopped unit and replaces a running
+  # one -- so enable (for boot) and restart (for now) are separate steps.
+  systemctl --user enable hollerback-broker.service >/dev/null 2>&1
+  systemctl --user restart hollerback-broker.service >/dev/null 2>&1 && STARTED=1
   # survive logout / start at boot
   command -v loginctl >/dev/null 2>&1 && loginctl enable-linger "$USER" >/dev/null 2>&1
   sleep 2
@@ -135,6 +142,23 @@ fi
 
 if [ "$STARTED" = "1" ] && curl -fsS --max-time 5 "http://$BIND:$PORT/v1/health" >/dev/null 2>&1; then
   echo "    running as a systemd user service (survives logout and reboot)"
+  # Confirm the LIVE process is the code just installed, not a survivor of it.
+  "$PY" - "$PREFIX/broker/hollerback_broker/__init__.py" "http://$BIND:$PORT" <<'VBEOF'
+import pathlib, re, sys, urllib.request
+src = pathlib.Path(sys.argv[1]).read_text()
+want = (re.search(r'__version__\s*=\s*"([^"]+)"', src) or [None, "?"])[1]
+try:
+    got = __import__("json").loads(
+        urllib.request.urlopen(sys.argv[2] + "/v1/health", timeout=10).read()).get("version")
+except Exception as exc:
+    print(f"    could not confirm the running version ({exc})"); raise SystemExit(0)
+if got == want:
+    print(f"    serving version {got}")
+else:
+    print(f"    WARNING: installed {want} but the live broker reports {got or 'none'}.")
+    print( "          Something is still running the old code:")
+    print( "              systemctl --user restart hollerback-broker")
+VBEOF
 else
   cat <<EOF
     systemd not available -- start it yourself:
