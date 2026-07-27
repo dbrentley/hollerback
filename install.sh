@@ -129,6 +129,13 @@ if agent:
 data.setdefault("pluginConfigs", {})[source] = {"options": opts}
 p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 print(f"    settings.json updated (BROKER_URL={broker})")
+if agent:
+    # Worth shouting about: this is stored at user scope, so it applies to EVERY
+    # workspace on the machine and switches off the per-directory derivation that
+    # makes several agents possible here.
+    print(f"    WARNING: --agent pinned AGENT_NAME={agent} for this whole machine.")
+    print( "          Every workspace here will use that one name, and per-directory")
+    print( "          identity is disabled. Re-run without --agent to undo.")
 PYEOF
 rc=$?
 [ $rc -ne 0 ] && exit 1
