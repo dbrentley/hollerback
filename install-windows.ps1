@@ -173,8 +173,11 @@ if ($existing -and $existing -ne $AgentName -and -not $Default) {
   # under a name nobody is addressing any more.
   Write-Host "    REFUSING: this machine's default agent is already '$existing'." -ForegroundColor Red
   Write-Host "    Overwriting it would rename that session on its next restart." -ForegroundColor Red
-  Write-Host "    To add '$AgentName' alongside it, name a workspace instead:" -ForegroundColor Yellow
-  Write-Host "        cd <that project>; powershell -File install-windows.ps1 -AgentName $AgentName -Here" -ForegroundColor Yellow
+  Write-Host "    To add '$AgentName' alongside it, name a workspace instead." -ForegroundColor Yellow
+  Write-Host "    Re-run from the directory that agent should own -- you are in:" -ForegroundColor Yellow
+  Write-Host "        $((Get-Location).Path)" -ForegroundColor White
+  Write-Host "    and the command is this one plus -Here:" -ForegroundColor Yellow
+  Write-Host "        powershell -File `"$PSCommandPath`" -AgentName $AgentName -Broker $Broker -Here" -ForegroundColor White
   Write-Host "    Or to genuinely replace the default, pass -Default." -ForegroundColor Yellow
   exit 2
 }

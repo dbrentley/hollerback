@@ -172,12 +172,15 @@ current = (data.get("pluginConfigs", {}).get(source, {}).get("options", {})
 if current and current != agent and not set_default:
     # Silently renaming the existing agent is the one thing this must never do:
     # the old session keeps answering under a name nobody is addressing any more.
+    import os as _os
+    here = _os.getcwd()
     print(f"    REFUSING: this machine's default agent is already '{current}'.")
     print(f"    Overwriting it would rename that session on its next restart.")
-    print(f"    To add '{agent}' alongside it, name a workspace instead:")
-    print(f"        cd <that project> && install.sh --agent {agent} --here")
-    print(f"    Or to genuinely replace the default:")
-    print(f"        install.sh --agent {agent} --default")
+    print(f"    To add '{agent}' alongside it, name a workspace instead.")
+    print(f"    Re-run from the directory that agent should own -- you are in:")
+    print(f"        {here}")
+    print(f"    and the command is this one plus --here.")
+    print(f"    Or to genuinely replace the default, pass --default.")
     raise SystemExit(2)
 
 data.setdefault("pluginConfigs", {})[source] = {
