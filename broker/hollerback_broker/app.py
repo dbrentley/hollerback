@@ -34,7 +34,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
-from . import store
+from . import __version__, store
 
 # --- config -----------------------------------------------------------------
 
@@ -192,7 +192,10 @@ async def _body(request: Request) -> dict:
 
 
 async def health(request: Request) -> JSONResponse:
-    return JSONResponse({"ok": True, "peers": store.list_agents()})
+    # version lets an installer notice it is pairing a plugin with a broker
+    # from a different commit -- the two are deployed separately and drift.
+    return JSONResponse({"ok": True, "version": __version__,
+                         "peers": store.list_agents()})
 
 
 async def peers(request: Request) -> JSONResponse:

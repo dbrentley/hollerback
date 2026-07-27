@@ -512,7 +512,14 @@ def call_tool(name: str, args: dict) -> dict:
                 f"{BROKER}/v1/announce", {"from": AGENT, "capabilities": text}, TOKEN
             )
             if not r.get("ok"):
-                return _err(f"could not announce: {r.get('error')}")
+                err = str(r.get("error", ""))
+                if "404" in err or "not found" in err.lower():
+                    return _err(
+                        "this broker has no /v1/announce -- it is older than this "
+                        "plugin. Update it (install-broker.sh) and try again. "
+                        "Everything else still works."
+                    )
+                return _err(f"could not announce: {err}")
             return _ok(
                 f"Announced as '{AGENT}'. Peers calling discover() now see:\n  {text}"
             )

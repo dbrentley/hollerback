@@ -2,8 +2,10 @@
   "name": "hollerback",
   "displayName": "Hollerback",
   "description": "Ask the other Claude Code session a question and get an answer back, without copy-pasting between terminals.",
-  "version": "0.1.0",
-  "author": { "name": "brent" },
+  "version": "0.2.0",
+  "author": {
+    "name": "brent"
+  },
   "userConfig": {
     "AGENT_NAME": {
       "type": "string",

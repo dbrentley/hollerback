@@ -68,29 +68,32 @@ if [ -L "$DEST" ]; then
   echo "    $DEST is a symlink to $(readlink "$DEST")"
   echo "    leaving it alone (this looks like the dev machine)"
 else
-  # Prefer the broker: it serves the exact plugin build it speaks to. Fall back to
-  # GitHub so `curl <raw>/install.sh | bash` is self-sufficient.
+  # Prefer GitHub, fall back to the broker. This used to be the other way round,
+  # on the theory that the broker serves the build it speaks to -- but a broker is
+  # a long-lived deployment that lags the repo, so a fresh `curl <raw>/install.sh`
+  # would install a stale plugin and pair a new installer with old code. GitHub is
+  # what the documented one-liner points at, so make that authoritative; the broker
+  # remains the fallback for a fork, an air-gap, or GitHub being unreachable.
   TMPZIP="$(mktemp -t hollerback-XXXXXX.zip)"
   SRC_DESC=""
-  if [ "$BROKER_UP" = "1" ] && curl -fsS --max-time 60 "$BROKER/v1/plugin.zip" -o "$TMPZIP" 2>/dev/null; then
-    SRC_DESC="broker"
-  elif curl -fsSL --max-time 90 "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" -o "$TMPZIP.tgz" 2>/dev/null; then
+  if curl -fsSL --max-time 90 "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" -o "$TMPZIP.tgz" 2>/dev/null; then
     SRC_DESC="github ($REPO@$REF)"
+  elif [ "$BROKER_UP" = "1" ] && curl -fsS --max-time 60 "$BROKER/v1/plugin.zip" -o "$TMPZIP" 2>/dev/null; then
+    SRC_DESC="broker"
   else
-    echo "    could not fetch the plugin from $BROKER or from GitHub ($REPO@$REF)" >&2
+    echo "    could not fetch the plugin from GitHub ($REPO@$REF) or from $BROKER" >&2
     echo "    Set HOLLERBACK_REPO=you/hollerback, or run this from a clone." >&2
     rm -f "$TMPZIP" "$TMPZIP.tgz"; exit 1
   fi
 
   rm -rf "$DEST"; mkdir -p "$DEST"
   if [ "$SRC_DESC" = "broker" ]; then
-    "$PY" - "$TMPZIP" "$DEST" <<'PYEOF'
+    "$PY" - "$TMPZIP" "$DEST" <<'ZIPEOF'
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1]) as z:
     z.extractall(sys.argv[2])
-PYEOF
+ZIPEOF
   else
-    # The tarball is the whole repo; the plugin is one directory inside it.
     TMPX="$(mktemp -d)"
     tar xzf "$TMPZIP.tgz" -C "$TMPX" --strip-components=1 || {
       echo "    could not unpack the GitHub tarball" >&2; exit 1; }
@@ -139,6 +142,28 @@ assert d and d[0].get("command"), "monitor entry incomplete"
 print("    verified: monitors.json -- ok", d[0]["name"])
 PYEOF
 [ $? -ne 0 ] && { echo "    monitors.json is invalid" >&2; exit 1; }
+
+# --- 5b. broker/plugin version handshake -------------------------------------
+# The two halves are deployed separately, so they drift. Silence here is how a
+# fresh installer ends up paired with a plugin from another commit.
+if [ "$BROKER_UP" = "1" ]; then
+  "$PY" - "$DEST/.claude-plugin/plugin.json" "$BROKER" <<'VEOF'
+import json, pathlib, sys, urllib.request
+mine = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8-sig")).get("version", "?")
+try:
+    theirs = json.loads(urllib.request.urlopen(sys.argv[2] + "/v1/health", timeout=10).read()).get("version")
+except Exception:
+    theirs = None
+if theirs is None:
+    print(f"    NOTE: broker predates version reporting; plugin is {mine}.")
+    print( "          Re-run install-broker.sh so both halves match.")
+elif theirs != mine:
+    print(f"    WARNING: plugin {mine} vs broker {theirs} -- they are from different commits.")
+    print( "          Re-run install-broker.sh on the broker machine.")
+else:
+    print(f"    versions match (plugin and broker both {mine})")
+VEOF
+fi
 
 # --- 6. smoke test -----------------------------------------------------------
 echo "==> smoke test: connecting for 4s ..."
