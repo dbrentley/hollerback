@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import socket
 import sys
 import time
 import urllib.error
@@ -147,7 +148,33 @@ def load_config() -> dict:
     cfg["broker"] = os.environ.get("HOLLERBACK_BROKER") or cfg["broker"]
     cfg["token"] = os.environ.get("HOLLERBACK_TOKEN") or cfg["token"]
     cfg["broker"] = cfg["broker"].rstrip("/")
+    cfg["agent"] = cfg["agent"] or default_agent_name()
     return cfg
+
+
+def default_agent_name() -> str:
+    """Derive an id from where this session actually is.
+
+    Nothing should have to be named at install time. A name typed into an
+    installer is one per machine, so a second session there either collides or
+    forces a rename, and the name goes stale the moment that session moves to
+    another repo. <host>/<project-dir> needs no configuration, is stable for as
+    long as the session stays put, and is distinct per workspace by construction.
+
+    It is deliberately mechanical, not descriptive -- what a session *does* is
+    announce()d separately and read back by discover(), so the id never has to
+    carry meaning.
+    """
+    try:
+        host = socket.gethostname().split(".")[0].strip() or "unknown-host"
+    except Exception:  # noqa: BLE001
+        host = "unknown-host"
+    root = project_root()
+    name = root.name or root.anchor.strip("/\\:") or "root"
+    if root == pathlib.Path.home():
+        name = "home"
+    safe = lambda s: "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in s)  # noqa: E731
+    return f"{safe(host)}/{safe(name)}"
 
 
 # --- open-question state ----------------------------------------------------

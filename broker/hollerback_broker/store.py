@@ -63,12 +63,18 @@ CREATE TABLE IF NOT EXISTS files (
 );
 
 CREATE TABLE IF NOT EXISTS agents (
-    name        TEXT PRIMARY KEY,
-    session_id  TEXT NOT NULL DEFAULT '',
-    cwd         TEXT NOT NULL DEFAULT '',
-    host        TEXT NOT NULL DEFAULT '',
-    last_seen   REAL NOT NULL,
-    connected   INTEGER NOT NULL DEFAULT 0
+    name         TEXT PRIMARY KEY,
+    session_id   TEXT NOT NULL DEFAULT '',
+    cwd          TEXT NOT NULL DEFAULT '',
+    host         TEXT NOT NULL DEFAULT '',
+    last_seen    REAL NOT NULL,
+    connected    INTEGER NOT NULL DEFAULT 0,
+    -- What this session says it is. Stored rather than broadcast on purpose: an
+    -- announcement is useless to anyone who connects afterwards, and peers join
+    -- and leave constantly. discover() reads this, so arrival order stops
+    -- mattering.
+    capabilities TEXT NOT NULL DEFAULT '',
+    announced_at REAL
 );
 """
 
@@ -101,7 +107,31 @@ def init() -> None:
         # the unit is Restart=always, so that path is routine. Anything still set
         # here is a leftover lie about an agent that may never come back.
         c.execute("UPDATE agents SET connected=0 WHERE connected=1")
+        acols = {r["name"] for r in c.execute("PRAGMA table_info(agents)")}
+        if acols and "capabilities" not in acols:
+            c.execute("ALTER TABLE agents ADD COLUMN capabilities TEXT NOT NULL DEFAULT ''")
+        if acols and "announced_at" not in acols:
+            c.execute("ALTER TABLE agents ADD COLUMN announced_at REAL")
     BLOB_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def set_capabilities(name: str, text: str) -> None:
+    """Record what an agent says it is. Survives its disconnection on purpose."""
+    now = time.time()
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO agents (name,last_seen,connected,capabilities,announced_at)"
+            " VALUES (?,?,0,?,?)"
+            " ON CONFLICT(name) DO UPDATE SET capabilities=excluded.capabilities,"
+            "  announced_at=excluded.announced_at",
+            (name, now, text, now),
+        )
+
+
+def has_announced(name: str) -> bool:
+    with _conn() as c:
+        r = c.execute("SELECT capabilities FROM agents WHERE name=?", (name,)).fetchone()
+    return bool(r and (r["capabilities"] or "").strip())
 
 
 def add_file(
@@ -347,6 +377,7 @@ def list_agents() -> list[dict]:
     now = time.time()
     out = []
     for r in rows:
+        keys = r.keys()
         since = now - r["last_seen"]
         # The flag alone is not evidence -- see PRESENCE_GRACE_SECS. A suspended
         # laptop or a severed link can leave the flag set long after the peer is
@@ -358,6 +389,7 @@ def list_agents() -> list[dict]:
                 "cwd": r["cwd"],
                 "host": r["host"],
                 "session_id": r["session_id"],
+                "capabilities": (r["capabilities"] if "capabilities" in keys else "") or "",
                 "last_seen": r["last_seen"],
                 "seconds_since_seen": round(since, 1),
                 "open_questions": len(open_questions(r["name"])),

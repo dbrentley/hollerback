@@ -2,10 +2,11 @@
 """hollerback MCP server (stdio, JSON-RPC 2.0 over stdin/stdout).
 
 Gives each Claude Code session the tools to talk to its peer:
-    ask_peer     ask a question, return immediately, get notified later
-    answer       answer a question this session was asked
+    holler       ask a question, return immediately, get notified later
+    holler_back  answer a question this session was asked
     check_inbox  what am I owed / what do I owe
-    list_peers   who is out there
+    announce     say what this session is, so peers can find it
+    discover     who is out there and what each one does
 
 stdio rather than HTTP on purpose: stdio servers inherit CLAUDE_PROJECT_DIR and
 CLAUDE_CODE_SESSION_ID from the host, so a session can identify itself. HTTP
@@ -103,7 +104,7 @@ TOOLS = [
             "properties": {
                 "peer": {
                     "type": "string",
-                    "description": "Which session to ask, e.g. 'backend' or 'frontend'. Use list_peers if unsure.",
+                    "description": "Peer id from discover(), or any unique part of one. Call discover() first.",
                 },
                 "question": {
                     "type": "string",
@@ -216,9 +217,38 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "list_peers",
-        "description": "Which peer sessions exist, whether they are online, and what they are working on.",
+        "name": "discover",
+        "description": (
+            "Find out which other Claude Code sessions exist and what each one is "
+            "for. Call this BEFORE holler/send_file/request_file -- peer ids are "
+            "derived from host and directory, not chosen, so you cannot guess "
+            "them. Shows each session's self-description, whether it is online, "
+            "and what it owes answers on. Safe to call any time; it reads stored "
+            "state, so it is complete no matter who announced when."
+        ),
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "announce",
+        "description": (
+            "Tell the network what THIS session is, so peers can find you with "
+            "discover(). Do this once, early -- a session nobody can identify does "
+            "not get asked anything. Describe the codebase you are in, what you "
+            "own, and what you can answer authoritatively: e.g. 'OpenDAoC game "
+            "server. Combat, spells and NPC AI in GameServer/. Can answer about "
+            "packet handlers and the DB schema.' It is stored, not broadcast, so "
+            "sessions that start later still see it. Call again to update."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "capabilities": {
+                    "type": "string",
+                    "description": "What this session is and what it can answer. A few sentences.",
+                }
+            },
+            "required": ["capabilities"],
+        },
     },
     {
         "name": "tell_peer",
@@ -446,19 +476,46 @@ def call_tool(name: str, args: dict) -> dict:
                     lines.append(f"  [{q['id']}] to {q['to']}: {q['text']}")
             return _ok("\n".join(lines))
 
-        if name == "list_peers":
+        if name == "discover":
             r = http_json(f"{BROKER}/v1/peers", None, TOKEN)
-            rows = [p for p in r.get("peers", [])]
+            rows = list(r.get("peers", []))
+            # Always lead with your own id. It is derived, not configured, so this
+            # is the only place a session can find out what peers will call it.
+            lines = [f"You are '{AGENT}'.", ""]
             if not rows:
-                return _ok("No sessions have connected to the broker yet.")
-            lines = []
+                lines += [
+                    "No sessions have connected to this broker yet.",
+                    "Call announce() anyway -- it is stored, so peers starting later",
+                    "will still see what you are.",
+                ]
+                return _ok("\n".join(lines))
             for p in rows:
-                me = " (you)" if p["name"] == AGENT else ""
-                state = "online" if p["online"] else f"offline for {int(p['seconds_since_seen'])}s"
-                extra = f", cwd={p['cwd']}" if p.get("cwd") else ""
+                me = "  (this session)" if p["name"] == AGENT else ""
+                state = "online" if p["online"] else f"offline {int(p['seconds_since_seen'])}s"
                 owes = f", owes {p['open_questions']} answer(s)" if p["open_questions"] else ""
-                lines.append(f"  {p['name']}{me}: {state}{extra}{owes}")
-            return _ok("Peers:\n" + "\n".join(lines))
+                lines.append(f"{p['name']}  [{state}{owes}]{me}")
+                cap = (p.get("capabilities") or "").strip()
+                lines.append(f"    {cap}" if cap else
+                             "    (has not announced -- unknown what it does)")
+                if p.get("cwd"):
+                    lines.append(f"    dir: {p['cwd']}")
+            lines += ["", "Address a peer by its id, or any unique part of one."]
+            if not (next((p for p in rows if p["name"] == AGENT), {}) or {}).get("capabilities"):
+                lines.append("You have not announced yet -- peers cannot see what you do.")
+            return _ok("\n".join(lines))
+
+        if name == "announce":
+            text = (args.get("capabilities") or "").strip()
+            if not text:
+                return _err("announce needs 'capabilities' -- what is this session for?")
+            r = http_json(
+                f"{BROKER}/v1/announce", {"from": AGENT, "capabilities": text}, TOKEN
+            )
+            if not r.get("ok"):
+                return _err(f"could not announce: {r.get('error')}")
+            return _ok(
+                f"Announced as '{AGENT}'. Peers calling discover() now see:\n  {text}"
+            )
 
         if name == "tell_peer":
             peer = (args.get("peer") or "").strip()

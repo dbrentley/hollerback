@@ -9,11 +9,34 @@ Several Claude Code sessions are working on this system at once, on different
 machines and different parts of the stack. You can talk to them directly
 instead of guessing or making the user relay.
 
-**You do not know who is out there — `list_peers()` does.** Call it before you
-assume a name. It reports each session's name, whether it is online, what
-directory it is working in, and what it still owes answers on. Names are
-whatever each session was configured with (`frontend`, `backend`, `docs`, …),
-and new ones can appear at any time.
+## Say what you are, once
+
+Nobody names these sessions. Each one is `<host>/<project-dir>` — derived, not
+configured — so an id tells a peer *where* you are and nothing about what you
+know. **Call `announce()` early**, with what this codebase is and what you can
+answer authoritatively:
+
+```
+announce(capabilities="OpenDAoC game server. Combat, spells and NPC AI live in
+                       GameServer/. I can answer about packet handlers, the DB
+                       schema, and anything in this repo's history.")
+```
+
+It is stored on the broker, not broadcast, so sessions that start hours later
+still see it. A session that never announces is listed as unknown, and peers have
+no reason to ask it anything.
+
+## Finding who to ask
+
+**You do not know who is out there — `discover()` does.** It lists every session,
+what each says it does, whether it is online, and what it owes answers on. Call it
+before you address anyone: ids are derived from host and directory, so you cannot
+guess them, and the set changes as sessions come and go.
+
+Address a peer by its id or any unique part of one — `holler(peer="optimize", …)`
+matches `ada/optimize`. Matching also looks at what a peer announced, so
+`peer="duty-cycle solver"` finds whoever said that. If it is ambiguous you get the
+candidates back instead of a guess; re-send with a specific id.
 
 ## Asking
 
@@ -21,7 +44,7 @@ and new ones can appear at any time.
 immediately**. It does not block, and you must not wait for it.
 
 ```
-holler(peer="backend",
+holler(peer="ada/daoc",
          question="How does the order service decide idempotency for POST /orders? I need the exact header name.",
          context="wiring the retry path in src/api/orders.ts")
 ```
@@ -104,3 +127,9 @@ the peer will build against whatever you say.
 
 Use `check_inbox()` if you think you may have missed something, or if the user
 asks what is outstanding.
+
+If a peer disappears while owing you an answer, the broker tells you so — you will
+not be left waiting on a session that no longer exists. And if your own link to the
+broker drops for a while, you are told when it comes back, since your tools keep
+working while you are disconnected and nothing else would reveal that you had gone
+deaf.

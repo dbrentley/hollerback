@@ -224,35 +224,22 @@ Then, in each session:
 - **The workspace must be trusted**, or monitors are skipped with no error at all.
 - **Monitors don't arm in `-p`/headless mode.** Test interactively.
 - Status line should show `1 monitor`, and there should be **9** hollerback tools.
-- **Several agents on one machine come from the workspace, not the machine.** Claude
-  Code reads `pluginConfigs` from user scope only, so plugin config holds exactly one
-  `AGENT_NAME` per machine. `.hollerback/agent.json` in a project outranks it, which
-  is what `install.sh --agent NAME --here` writes — so a repo is its own agent with
-  nothing to remember at launch. `HOLLERBACK_AGENT=docs claude` still works for a
-  one-off. Two sessions on the same name both receive that name's traffic and either
-  can drain the other's backlog, so never let two workspaces claim one name.
-- **The installers refuse to rename an existing agent.** Re-running with a different
-  name used to overwrite the machine default, silently renaming a live session on its
-  next restart. It now exits 2 and points at `--here` / `-Here`; `--default` /
-  `-Default` is the explicit opt-in to actually replace it.
-
-> **Nearly every "bug" in this project's history was a stale child process.**
-> Monitors and MCP servers outlive edits to their own source. Before debugging a
-> transport fault, restart the session and (if the broker changed)
-> `systemctl --user restart hollerback-broker`.
-
-### The reconnect / backlog coupling
-
-`take_undelivered()` runs on **every** stream open, not just the first, and
-`listen.py` does no dedupe by message id. So every broker restart — which
-`Restart=always` makes routine, and which the note above recommends as a debugging
-step — re-injects every outstanding question into every connected peer's context as
-fresh notifications. That is by design (it is what makes a silent drop self-heal),
-but it means "restart the broker" is not free while questions are open.
-
-Two constants govern how often that happens, and they live in different files with
-nothing tying them together:
-
+- **Nothing is named, anywhere.** An agent id is `<host>/<project-dir>`, derived by
+  `_common.default_agent_name()`. This exists because `pluginConfigs` is user-scope
+  only, so any name stored there is one-per-machine and collides the moment you want
+  two agents on one box — which the installers used to handle with a rename-refusal
+  and a per-workspace config file, both since deleted. An explicit `HOLLERBACK_AGENT`
+  still wins if something really needs pinning.
+- **`announce()` is stored, never broadcast.** A broadcast only reaches whoever is
+  connected at that instant, and sessions come and go constantly, so a late joiner
+  would be permanently ignorant. Capabilities live in `agents.capabilities` and
+  `discover()` reads them, which makes arrival order irrelevant. The broker nudges
+  an agent to announce once per process, only if it never has.
+- **`/v1/ask` resolves the target before queueing.** Ids are mechanical, so nobody
+  types them from memory — `resolve_peer()` takes an exact id or a unique substring
+  of an id or of announced capabilities, and returns the candidates on ambiguity
+  rather than guessing. Guessing would route a question to the wrong session and
+  leave the asker waiting on an answer nobody is writing.
 - `listen.py: READ_TIMEOUT = 60` — hardcoded client-side socket timeout.
 - `app.py: KEEPALIVE_SECS = 20` — server-side, tunable via `HOLLERBACK_KEEPALIVE_SECS`
   and written into `~/.config/hollerback/broker.env` by `install-broker.sh`.

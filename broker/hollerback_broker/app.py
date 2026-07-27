@@ -81,6 +81,9 @@ def _deliver(msg: dict) -> bool:
 # immediately would emit a notice every time a laptop changes wifi.
 DEPART_NOTICE_SECS = float(os.getenv("HOLLERBACK_DEPART_NOTICE_SECS", "45"))
 NOTICE_SENDER = "hollerback"
+# Agents nudged to announce in this process, so a session that declines to
+# announce is not pestered on every reconnect.
+_announce_nudged: set[str] = set()
 
 
 async def _notify_departure(agent: str) -> None:
@@ -129,6 +132,55 @@ async def _notify_departure(agent: str) -> None:
         _deliver(msg)
 
 
+def resolve_peer(target: str) -> tuple[str | None, list[dict]]:
+    """Map what the caller typed onto a real agent id.
+
+    Ids are mechanical now (<host>/<project-dir>), so nobody types them from
+    memory -- they come out of discover(). Accept an exact id, or any unique
+    substring of an id or of what that agent said it does, and report the
+    candidates instead of guessing when it is ambiguous. Guessing here would
+    silently route a question to the wrong session, which is unrecoverable: the
+    asker waits on an answer that another agent is busy not writing.
+
+    Returns (resolved_name, candidates). Exactly one of them is meaningful.
+    """
+    agents = store.list_agents()
+    for a in agents:
+        if a["name"] == target:
+            return target, []
+    q = target.strip().lower()
+    if not q:
+        return None, agents
+    hits = [
+        a for a in agents
+        if q in a["name"].lower() or q in (a.get("capabilities") or "").lower()
+    ]
+    if len(hits) == 1:
+        return hits[0]["name"], []
+    return None, hits or agents
+
+
+async def announce(request: Request) -> JSONResponse:
+    """Record what a session is, so peers arriving later can still find out.
+
+    A broadcast would only reach whoever happened to be connected at the time,
+    and sessions come and go constantly. Storing it means discover() is complete
+    regardless of who announced when.
+    """
+    if not _authorized(request):
+        return _unauth()
+    b = await _body(request)
+    frm = (b.get("from") or "").strip()
+    text = (b.get("capabilities") or "").strip()
+    if not frm or not text:
+        return JSONResponse(
+            {"ok": False, "error": "need 'from' and 'capabilities'"}, status_code=400
+        )
+    store.set_capabilities(frm, text)
+    _announce_nudged.discard(frm)
+    return JSONResponse({"ok": True, "agent": frm, "capabilities": text})
+
+
 async def _body(request: Request) -> dict:
     try:
         return await request.json()
@@ -160,6 +212,24 @@ async def ask(request: Request) -> JSONResponse:
         return JSONResponse(
             {"ok": False, "error": "need 'to' and 'text'"}, status_code=400
         )
+
+    resolved, candidates = resolve_peer(to)
+    if resolved is None:
+        listing = "\n".join(
+            f"  {a['name']} — {a.get('capabilities') or '(has not announced)'}"
+            for a in candidates
+        ) or "  (no sessions have ever connected)"
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    f"{to!r} does not identify one peer. Call discover() and use an "
+                    f"id from it. Closest matches:\n{listing}"
+                ),
+            },
+            status_code=404,
+        )
+    to = resolved
 
     agents = store.list_agents()
     known = {a["name"] for a in agents}
@@ -408,6 +478,17 @@ async def stream(request: Request) -> Response:
         # Anything queued while this agent had no session connected.
         for msg in store.take_undelivered(agent):
             queue.put_nowait(msg)
+        # A session nobody can identify is invisible in discover(), so peers
+        # cannot tell whether it is worth asking. Nudge once per process, and
+        # only if it has never said what it is.
+        if agent not in _announce_nudged and not store.has_announced(agent):
+            _announce_nudged.add(agent)
+            queue.put_nowait(store.add_message(
+                to_agent=agent, from_agent=NOTICE_SENDER, kind="note",
+                text=(f"you are connected as '{agent}', but peers cannot see what you "
+                      f"do. Call announce() with a short description of this codebase "
+                      f"and what you own, so discover() can route questions to you."),
+            ))
         try:
             yield b": hollerback connected\n\n"
             while True:
@@ -560,6 +641,7 @@ app = Starlette(
         Route("/v1/ask", ask, methods=["POST"]),
         Route("/v1/answer", answer, methods=["POST"]),
         Route("/v1/note", note, methods=["POST"]),
+        Route("/v1/announce", announce, methods=["POST"]),
         Route("/v1/send", send, methods=["POST"]),
         Route("/v1/pending/{agent}", pending),
         Route("/v1/message/{id}", message),

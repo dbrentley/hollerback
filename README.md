@@ -108,8 +108,11 @@ claude plugin marketplace add dbrentley/hollerback
 claude plugin install hollerback@hollerback --config AGENT_NAME=backend --config BROKER_URL=http://<broker>:8850
 ```
 
-`--agent` is just a name — `frontend`, `backend`, `docs`, whatever peers should
-call this session.
+**Nothing is named.** Each session identifies itself as `<host>/<project-dir>`, and
+says what it *does* at runtime with `announce()`. So this installs once per machine
+and every workspace on it is automatically its own agent — no second install, no
+naming, nothing to collide. Peers find each other with `discover()`, which reads
+stored announcements and is therefore complete no matter who started when.
 
 ### 3. Start a new session
 
@@ -187,7 +190,8 @@ processes; an old one keeps running against the old broker until its session exi
 | `holler_back(request_id, text)` | Answer a question you were asked. Routed back to whoever asked. |
 | `read_message(message_id)` | Full untruncated text — notifications get clipped for display. |
 | `check_inbox()` | What you owe, what you're waiting on, files not yet saved. |
-| `list_peers()` | Who exists, online or not, their working directory, what they owe. |
+| `discover()` | Who exists, what each one *is*, online or not, and what they owe. Call before addressing anyone. |
+| `announce(capabilities)` | Say what this session is. Stored, so sessions starting later still see it. |
 | `tell_peer(peer, note)` | Heads-up, no reply expected. `peer="*"` broadcasts to everyone. |
 | `send_file(peer, path, note?)` | Send a file instead of pasting it into a message. |
 | `request_file(peer, path, reason?)` | Ask a peer for a file from their side. |
@@ -212,33 +216,20 @@ reveal that it had gone deaf.
 
 ## More than two
 
-The bus is name-addressed. A new session joins by connecting under a name nobody
-else is using — there's no registry to update, and `list_peers()` discovers it.
+Nothing has to be registered, named, or installed again. A session becomes a peer
+by starting in a directory — it identifies itself as `<host>/<project-dir>`, and
+`discover()` finds it.
 
-Two things to know:
-
-- Plugin config is **user-scope only** (Claude Code does not read `pluginConfigs`
-  from project settings), so a machine has exactly one *default* name. Give a
-  workspace its own name instead — that is what a second agent on one machine
-  looks like:
-
-  ```bash
-  cd ~/work/optimizer
-  curl -fsSL http://<broker>:8850/install.sh | bash -s -- \
-      --agent power-optimizer --broker http://<broker>:8850 --here
-  ```
-  ```powershell
-  cd C:\work\optimizer
-  powershell -File $env:TEMP\hb.ps1 -AgentName power-optimizer -Broker http://<broker>:8850 -Here
-  ```
-
-  That writes `.hollerback/agent.json`, which outranks the machine default, so any
-  session opened there connects under that name with nothing to remember at launch.
-  `HOLLERBACK_AGENT=docs claude` still works for a one-off. Re-running an installer
-  with a new name and **no** `--here` refuses rather than renaming your existing
-  agent; pass `--default` if replacing it is what you actually want.
-- **Two sessions sharing a name both receive that name's traffic**, and either
-  can drain the other's backlog. Give each one its own name.
+- **A second agent on a machine costs nothing.** Open a session in another
+  directory and it is another agent. This is why plugin config holds no name:
+  Claude Code reads `pluginConfigs` from user scope only, so anything stored there
+  is one-per-machine and would collide the moment you wanted two.
+- **Two sessions in the *same* directory share an id**, so they receive the same
+  traffic and either can drain the other's backlog. Give the second one its own
+  directory, or pin it with `HOLLERBACK_AGENT=whatever claude`.
+- **An id says where a session is, not what it knows.** That is what `announce()`
+  is for, and why it is stored rather than broadcast — a session that starts
+  tomorrow still sees what you announced today.
 
 ## Security model
 

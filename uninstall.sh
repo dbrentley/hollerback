@@ -9,19 +9,16 @@
 #   curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/uninstall.sh | bash
 #   curl -fsSL <broker>:8850/uninstall.sh | bash
 #   ./uninstall.sh --purge-inboxes    # also delete received files under $HOME
-#   ./uninstall.sh --keep-workspaces  # leave .hollerback/agent.json files alone
 #
 # Needs no broker and no network: it only removes local files.
 set -uo pipefail
 
 PURGE_INBOXES=0
-KEEP_WORKSPACES=0
 SCAN_DEPTH="${HOLLERBACK_SCAN_DEPTH:-6}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --purge-inboxes)   PURGE_INBOXES=1; shift ;;
-    --keep-workspaces) KEEP_WORKSPACES=1; shift ;;
     -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
@@ -101,7 +98,7 @@ if [ "$PURGE_INBOXES" = "1" ]; then
   find "$HOME" -maxdepth "$SCAN_DEPTH" -type d \( -name .hollerback -o -name .agentshare \) \
        -not -path "*/.venv/*" -not -path "*/node_modules/*" \
        -print -exec rm -rf {} + 2>/dev/null | sed 's/^/      deleted /'
-elif [ "$KEEP_WORKSPACES" = "0" ]; then
+else
   echo "    searching \$HOME for workspace agent names ..."
   found=0
   while IFS= read -r f; do
@@ -116,8 +113,6 @@ EOT
   [ "$found" = "0" ] && echo "      none found"
   echo "    keeping received files (.hollerback/inbox/ in your projects)"
   echo "    re-run with --purge-inboxes to delete those too"
-else
-  echo "    keeping workspace agent names and received files"
 fi
 
 [ "$removed" = "0" ] && echo "    nothing was installed"
