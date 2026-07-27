@@ -55,6 +55,10 @@ MAX_TEXT = 4000  # cap so one huge answer cannot flood the peer's context
 STARTUP_GRACE_SECS = float(os.environ.get("HOLLERBACK_STARTUP_GRACE_SECS", "8"))
 EMIT_SPACING_SECS = 0.4
 
+# Minimum outage worth telling the model about, in seconds. A broker restart is
+# ~3s and reconnects are silent by design; two minutes of silence is not.
+OUTAGE_NOTICE_SECS = float(os.environ.get("HOLLERBACK_OUTAGE_NOTICE_SECS", "120"))
+
 _started_at = time.monotonic()
 
 
@@ -137,7 +141,7 @@ def format_message(msg: dict) -> str:
     return line
 
 
-def stream_once(url: str, token: str) -> None:
+def stream_once(url: str, token: str, on_connect=None) -> None:
     """Consume one SSE connection until it drops. Raises on connection error."""
     req = urllib.request.Request(url, headers={"Accept": "text/event-stream"})
     if token:
@@ -145,6 +149,8 @@ def stream_once(url: str, token: str) -> None:
 
     with urllib.request.urlopen(req, timeout=READ_TIMEOUT) as resp:
         log(f"connected to {url}")
+        if on_connect is not None:
+            on_connect()
         for raw in resp:
             line = raw.decode("utf-8", "replace").rstrip("\r\n")
             if not line or line.startswith(":"):
@@ -194,16 +200,43 @@ def main() -> int:
 
     backoff = RECONNECT_MIN
     announced_outage = False
+    # A session whose link is down is DEAF but looks perfectly healthy: the MCP
+    # server is a separate process, so its tools keep working and it can still
+    # ask. Nothing else can tell it otherwise -- this is the only channel back to
+    # the model. Report only real outages: reconnects are routine (the broker's
+    # unit is Restart=always) and a line per blip would be pure context noise.
+    down_since = [None]
+
+    def announce_recovery() -> None:
+        started = down_since[0]
+        down_since[0] = None
+        if started is None:
+            return
+        gap = time.monotonic() - started
+        if gap < OUTAGE_NOTICE_SECS:
+            return
+        mins, secs = divmod(int(gap), 60)
+        emit(
+            f"[holler] LINK RESTORED — this session was disconnected from the "
+            f"hollerback broker for {mins}m{secs:02d}s and could not receive "
+            f"anything during that time. Unanswered questions and unfetched files "
+            f"have been re-delivered; run check_inbox() if you want the full list. "
+            f"(no reply needed)"
+        )
 
     while True:
         try:
-            stream_once(url, token)
+            stream_once(url, token, on_connect=announce_recovery)
             backoff = RECONNECT_MIN
             announced_outage = False
+            if down_since[0] is None:
+                down_since[0] = time.monotonic()
             log("stream closed, reconnecting")
         except KeyboardInterrupt:
             return 0
         except Exception as exc:  # noqa: BLE001 - never die, always retry
+            if down_since[0] is None:
+                down_since[0] = time.monotonic()
             if not announced_outage:
                 log(f"broker unreachable ({exc}); retrying quietly")
                 announced_outage = True

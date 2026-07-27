@@ -1071,6 +1071,26 @@ when `c12aa2e` was committed, and none are fixed.
   minutes later, orphaned to PPID 1 and parked in `ep_poll`. This is the same infinite-generator
   problem as [§4.7](#47-systemctl-restart-hung-forever-in-deactivating), and the reason the unit
   needs `FinalKillSignal=SIGKILL`. Outside systemd, use `kill -9`.
+- **Nobody was ever told when an agent went away.** Found 2026-07-26 and fixed the same
+  day. Four separate holes, not one: (a) `connected=False` was written in a single place —
+  the stream's `finally` — and pushed nowhere, so a peer whose answerer died simply never
+  heard back and could not distinguish "still thinking" from "that session is gone";
+  (b) `init()` never reset `agents.connected`, and `_subscribers` is in-memory, so any agent
+  connected when the broker was killed reported **online forever** — reproduced with a
+  `kill -9` and a restart; (c) `/v1/ask` consulted the live `_subscribers` set while
+  `list_peers` and the dashboard read the stale DB column, so the system already knew and
+  was showing the wrong source; (d) a session whose `listen.py` died kept working — the MCP
+  server is a separate process — so it could still ask but was deaf, with no way to notice,
+  while its peers were told *"it will get this when its session starts"* about a session that
+  was already started.
+  Fixes: `init()` clears the flag; `list_agents()` expires presence after
+  `PRESENCE_GRACE_SECS` (default `2 × keepalive + 5`) since `last_seen` is refreshed every
+  keepalive; `_notify_departure()` sends a `kind='note'` to any *live* asker after
+  `HOLLERBACK_DEPART_NOTICE_SECS` (45s, so reconnects and wifi blips stay silent); the
+  `/v1/ask` offline note stopped promising delivery; and `listen.py` emits one
+  `LINK RESTORED` line after an outage longer than `HOLLERBACK_OUTAGE_NOTICE_SECS` (120s).
+  Verified with 16 checks across two harnesses, including that a quick reconnect produces
+  **no** notice and that a short outage stays silent.
 - **There is no test suite, linter, or CI.** Verification is by running the thing.
 
 `CLAUDE.md` was written in that later session and carries these forward as working guidance.

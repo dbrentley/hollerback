@@ -99,6 +99,19 @@ Break any of these and the failure is silent, not loud.
   `store.take_undelivered()` therefore re-offers unanswered *questions* and
   unfetched *files* on every fresh attach, so a silent drop self-heals. Answers and
   notes are deliberately not re-sent.
+- **Presence must be able to go stale on its own.** `agents.connected` describes a
+  live SSE connection held in memory, so it cannot survive the process. `init()`
+  clears it at startup (a crash or `kill -9` never runs the stream's `finally`),
+  and `list_agents()` additionally treats `seconds_since_seen > PRESENCE_GRACE_SECS`
+  as offline, since the stream refreshes `last_seen` on every keepalive. Never
+  report presence from the flag alone — a suspended laptop leaves it set. Note
+  `/v1/ask` uses the in-memory `_subscribers` set instead, which is the more
+  accurate source; keep the two from drifting apart in what they claim.
+- **A departure notice must be `kind="note"`.** `_notify_departure()` tells anyone
+  waiting on an agent that it vanished. It is tempting to give system messages
+  their own `kind`, but an older `listen.py` has no branch for an unknown kind and
+  falls straight through to the *question* formatter — the peer would then try to
+  answer a system message. Every shipped client understands `note`.
 - **The auto-allow window is machine-global, keyed by agent name only.**
   `_common.state_path()` builds `~/.cache/hollerback/open_questions.<agent>.json`
   with no session id and no project path, and the `PreToolUse` hook is user-scope,

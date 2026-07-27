@@ -74,6 +74,59 @@ def _deliver(msg: dict) -> bool:
     return True
 
 
+# How long an agent must stay gone before its askers are told. listen.py
+# reconnects on its own and a network blip closes the stream too, so firing
+# immediately would emit a notice every time a laptop changes wifi.
+DEPART_NOTICE_SECS = float(os.getenv("HOLLERBACK_DEPART_NOTICE_SECS", "45"))
+NOTICE_SENDER = "hollerback"
+
+
+async def _notify_departure(agent: str) -> None:
+    """Tell whoever is waiting on this agent that it went away.
+
+    The gap this closes: asking is fire-and-forget, so a peer whose answerer dies
+    mid-question simply never hears back, and has no way to tell "still thinking"
+    from "that session no longer exists". Nothing else in the system ever pushes
+    a departure -- connected=False is written once, in the stream's finally block,
+    and read only by whoever thinks to call list_peers.
+
+    Sent as kind='note' on purpose. A new kind would fall through the `file`/`note`
+    branches of an older listen.py straight into the *question* formatter, and the
+    peer would try to answer a system message -- exactly the stale-client failure
+    this project already hit once. Every shipped client understands notes.
+    """
+    await asyncio.sleep(DEPART_NOTICE_SECS)
+    if _subscribers.get(agent):
+        return  # reconnected inside the grace window; nothing happened
+
+    waiting: dict[str, list[str]] = defaultdict(list)
+    for q in store.open_questions(agent):
+        if q["from"] != agent:
+            waiting[q["from"]].append(q["id"])
+
+    for asker, ids in waiting.items():
+        # Only tell someone who is here to hear it. A stored notice would be
+        # re-offered on their next attach (take_undelivered picks up anything
+        # undelivered), by which point the peer may well be back and the notice
+        # is a lie in the other direction.
+        if not _subscribers.get(asker):
+            continue
+        n = len(ids)
+        msg = store.add_message(
+            to_agent=asker,
+            from_agent=NOTICE_SENDER,
+            kind="note",
+            text=(
+                f"the '{agent}' session went offline with {n} question"
+                f"{'s' if n > 1 else ''} from you still unanswered "
+                f"({', '.join(ids)}). Nothing is lost -- each one is re-delivered "
+                f"automatically if a session reconnects under the name '{agent}'. "
+                f"Stop waiting on it and carry on; you will be notified if it answers."
+            ),
+        )
+        _deliver(msg)
+
+
 async def _body(request: Request) -> dict:
     try:
         return await request.json()
@@ -106,14 +159,25 @@ async def ask(request: Request) -> JSONResponse:
             {"ok": False, "error": "need 'to' and 'text'"}, status_code=400
         )
 
-    known = {a["name"] for a in store.list_agents()}
+    agents = store.list_agents()
+    known = {a["name"] for a in agents}
     msg = store.add_message(to, frm, "question", text, b.get("context") or "")
     live = _deliver(msg)
 
     if live:
         note = f"delivered to {to} now"
     elif to in known:
-        note = f"{to} is not connected right now; it will get this when its session starts"
+        # "when its session starts" over-promised: it implies delivery is coming,
+        # when the session may already be running with a dead monitor, or gone for
+        # good. Say what is actually true -- it is stored, and it moves only if
+        # something reconnects under that name.
+        seen = next((a["seconds_since_seen"] for a in agents if a["name"] == to), None)
+        ago = f", last seen {int(seen)}s ago" if seen is not None else ""
+        note = (
+            f"no session is connected as '{to}' right now{ago}. This is stored and "
+            f"nothing expires, but it is delivered only when a session reconnects "
+            f"under that name -- do not wait on it"
+        )
     else:
         note = (
             f"no session named {to!r} has ever connected"
@@ -358,6 +422,7 @@ async def stream(request: Request) -> Response:
             if not _subscribers[agent]:
                 _subscribers.pop(agent, None)
                 store.touch_agent(agent, connected=False)
+                asyncio.create_task(_notify_departure(agent))
 
     return StreamingResponse(
         events(),

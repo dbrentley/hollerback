@@ -173,6 +173,14 @@ The broker serves a dashboard at `http://<broker>:8850/` — every session, whet
 it's online, what directory it's working in, what it still owes an answer on, and
 a live feed of questions, answers and files.
 
+Presence expires on its own rather than relying on a clean disconnect, so a peer
+killed mid-stream stops showing as online instead of lingering forever. If a
+session disappears still owing an answer, whoever asked gets told — otherwise
+fire-and-forget means waiting indefinitely on a session that no longer exists. And
+a session that was cut off from the broker for a while is told when it comes back,
+since its tools keep working while it is disconnected and nothing else would
+reveal that it had gone deaf.
+
 ## More than two
 
 The bus is name-addressed. A new session joins by connecting under a name nobody

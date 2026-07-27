@@ -21,6 +21,16 @@ DB_PATH = pathlib.Path(
     os.getenv("HOLLERBACK_DB", str(pathlib.Path.home() / ".local/share/hollerback/hollerback.db"))
 )
 
+# Presence is a claim about a live SSE connection, so it has to be able to go
+# stale on its own. The stream refreshes last_seen on every keepalive, so an
+# agent that has missed two of them is not there -- whatever the connected flag
+# says. Without this, a broker killed mid-stream leaves the flag set and the peer
+# reads "online" forever.
+KEEPALIVE_SECS = int(os.getenv("HOLLERBACK_KEEPALIVE_SECS", "20"))
+PRESENCE_GRACE_SECS = float(
+    os.getenv("HOLLERBACK_PRESENCE_GRACE_SECS", str(max(2 * KEEPALIVE_SECS + 5, 30)))
+)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
     id          TEXT PRIMARY KEY,
@@ -85,6 +95,12 @@ def init() -> None:
         fcols = {r["name"] for r in c.execute("PRAGMA table_info(files)")}
         if fcols and "fetched_at" not in fcols:
             c.execute("ALTER TABLE files ADD COLUMN fetched_at REAL")
+        # No SSE connection can outlive the process that held it, so nothing is
+        # legitimately "connected" at startup. A clean shutdown clears the flag in
+        # the stream's finally block; a crash, a kill -9 or an OOM does not -- and
+        # the unit is Restart=always, so that path is routine. Anything still set
+        # here is a leftover lie about an agent that may never come back.
+        c.execute("UPDATE agents SET connected=0 WHERE connected=1")
     BLOB_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -328,17 +344,22 @@ def touch_agent(
 def list_agents() -> list[dict]:
     with _conn() as c:
         rows = c.execute("SELECT * FROM agents ORDER BY name").fetchall()
+    now = time.time()
     out = []
     for r in rows:
+        since = now - r["last_seen"]
+        # The flag alone is not evidence -- see PRESENCE_GRACE_SECS. A suspended
+        # laptop or a severed link can leave the flag set long after the peer is
+        # unreachable, and reporting that as "online" is worse than saying nothing.
         out.append(
             {
                 "name": r["name"],
-                "online": bool(r["connected"]),
+                "online": bool(r["connected"]) and since <= PRESENCE_GRACE_SECS,
                 "cwd": r["cwd"],
                 "host": r["host"],
                 "session_id": r["session_id"],
                 "last_seen": r["last_seen"],
-                "seconds_since_seen": round(time.time() - r["last_seen"], 1),
+                "seconds_since_seen": round(since, 1),
                 "open_questions": len(open_questions(r["name"])),
             }
         )
