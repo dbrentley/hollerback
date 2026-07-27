@@ -13,13 +13,29 @@
 # Needs no broker and no network: it only removes local files.
 set -uo pipefail
 
+# Printed by --help. Held here rather than sed'd out of the comment header,
+# because `curl ... | bash` leaves $0 as "bash" and there is no file to read.
+usage() {
+  cat <<'USAGEEOF'
+  hollerback — remove the plugin (Linux/macOS).
+
+    curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/uninstall.sh | bash
+
+    --purge-inboxes   also delete files peers sent you (.hollerback/inbox/)
+
+  Removes the plugin, every pluginConfigs entry it wrote, and local state. Needs
+  no broker and no network beyond fetching this script. The broker is separate --
+  see uninstall-broker.sh.
+USAGEEOF
+}
+
 PURGE_INBOXES=0
 SCAN_DEPTH="${HOLLERBACK_SCAN_DEPTH:-6}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --purge-inboxes)   PURGE_INBOXES=1; shift ;;
-    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done

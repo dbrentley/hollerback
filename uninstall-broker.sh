@@ -15,6 +15,23 @@
 # This does NOT touch the plugin on this machine -- that is uninstall.sh.
 set -uo pipefail
 
+# Printed by --help. Held here rather than sed'd out of the comment header,
+# because `curl ... | bash` leaves $0 as "bash" and there is no file to read.
+usage() {
+  cat <<'USAGEEOF'
+  hollerback — remove the broker.
+
+    curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/uninstall-broker.sh | bash
+
+    --purge-data   ALSO delete every message, answer, note and shared file
+
+  Stops and removes the service, its config and its installed code. Message
+  history is KEPT by default, so reinstalling resumes where you left off; nothing
+  in hollerback expires, so that history may be the only record of what two
+  sessions agreed. Does not touch the plugin -- that is uninstall.sh.
+USAGEEOF
+}
+
 PURGE_DATA=0
 UNIT="hollerback-broker.service"
 PREFIX="$HOME/.local/share/hollerback"
@@ -24,7 +41,7 @@ UNIT_FILE="$HOME/.config/systemd/user/$UNIT"
 while [ $# -gt 0 ]; do
   case "$1" in
     --purge-data) PURGE_DATA=1; shift ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done

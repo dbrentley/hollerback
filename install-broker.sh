@@ -16,6 +16,26 @@
 # (Tailscale/WireGuard/VPN). Never bind 0.0.0.0 on a network you don't trust.
 set -uo pipefail
 
+# Printed by --help. Held here rather than sed'd out of the comment header,
+# because `curl ... | bash` leaves $0 as "bash" and there is no file to read.
+usage() {
+  cat <<'USAGEEOF'
+  hollerback — install the broker (the message bus your sessions talk through).
+
+    curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/install-broker.sh \
+      | bash -s -- --bind <private-ip>
+
+    --bind ADDR    address to listen on. Default 127.0.0.1, which is right when
+                   every session is on this machine. For several machines, bind
+                   the private address peers reach you on (e.g. a Tailscale IP).
+    --port N       default 8850
+    --source DIR   install from a local checkout instead of GitHub
+
+  There is NO AUTHENTICATION -- the bind address is the boundary. Never bind
+  0.0.0.0 on a network you do not trust.
+USAGEEOF
+}
+
 REPO="${HOLLERBACK_REPO:-dbrentley/hollerback}"   # <-- set to your fork
 REF="${HOLLERBACK_REF:-main}"
 BIND="127.0.0.1"
@@ -28,7 +48,7 @@ while [ $# -gt 0 ]; do
     --bind)   BIND="${2:-}"; shift 2 ;;
     --port)   PORT="${2:-}"; shift 2 ;;
     --source) SRC="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -45,7 +65,14 @@ done
 echo "    python: $PY"
 
 # --- source: local checkout if we're in one, else fetch the repo ------------
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+# Only when this script is genuinely running FROM a file. Piped through bash,
+# BASH_SOURCE is unset and $0 is "bash", so dirname yields "." -- which silently
+# made `curl <github> | bash` install from whatever checkout you happened to be
+# standing in, rather than from GitHub as the command plainly says.
+HERE=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+  HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+fi
 if [ -n "$SRC" ]; then
   :
 elif [ -n "$HERE" ] && [ -f "$HERE/broker/pyproject.toml" ]; then

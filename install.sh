@@ -13,6 +13,24 @@
 # with discover(). One install per machine; every workspace on it is its own agent.
 set -uo pipefail
 
+# Printed by --help. Held here rather than sed'd out of the comment header,
+# because `curl ... | bash` leaves $0 as "bash" and there is no file to read.
+usage() {
+  cat <<'USAGEEOF'
+  hollerback — install the plugin (Linux/macOS).
+
+    curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/install.sh \
+      | bash -s -- --broker http://<host>:8850
+
+    --broker URL   where the broker is (required unless it is on localhost)
+    --agent NAME   advanced: pin one id for EVERY workspace on this machine.
+                   Normally omit -- each session derives <host>:<project-dir>.
+
+  Nothing needs naming. Install once per machine; every workspace on it is its
+  own agent, and each says what it does at runtime via announce().
+USAGEEOF
+}
+
 BROKER="${HOLLERBACK_BROKER:-http://127.0.0.1:8850}"
 AGENT="${HOLLERBACK_AGENT:-}"
 PLUGIN_SOURCE="hollerback@skills-dir"
@@ -23,7 +41,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --broker) BROKER="${2:-}"; shift 2 ;;
     --agent)  AGENT="${2:-}"; shift 2 ;;   # escape hatch; normally auto-derived
-    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
