@@ -5,6 +5,10 @@
 # scope silently strips monitors), and points it at the broker under a name you
 # choose. Re-run any time to update.
 #
+#   # straight from GitHub -- no clone, broker need not even be up yet
+#   curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/install.sh \
+#     | bash -s -- --agent backend --broker http://100.64.0.5:8850
+#
 #   # first agent on this machine -- becomes the machine default
 #   curl -fsSL http://100.64.0.5:8850/install.sh | bash -s -- --agent backend
 #
@@ -20,9 +24,11 @@
 # at launch. Re-running with a new name will NOT silently rename an existing one.
 set -uo pipefail
 
-BROKER="http://127.0.0.1:8850"
-AGENT=""
+BROKER="${HOLLERBACK_BROKER:-http://127.0.0.1:8850}"
+AGENT="${HOLLERBACK_AGENT:-}"
 PLUGIN_SOURCE="hollerback@skills-dir"
+REPO="${HOLLERBACK_REPO:-dbrentley/hollerback}"   # plugin source when no broker
+REF="${HOLLERBACK_REF:-main}"
 PROJECT=""        # non-empty => write workspace config there
 SET_DEFAULT=0     # 1 => intentionally overwrite the machine default
 
@@ -60,12 +66,22 @@ done
 echo "    python: $PY"
 
 # --- 2. reachability ---------------------------------------------------------
-if ! curl -fsS --max-time 10 "$BROKER/v1/health" >/dev/null 2>&1; then
-  echo "    CANNOT REACH BROKER at $BROKER" >&2
-  echo "    Is Tailscale up, and is hollerback-broker running?" >&2
-  exit 1
+# Not fatal any more. Piping this straight from GitHub is a supported install
+# path, and there the broker URL is whatever you passed -- it may legitimately be
+# down, or on a tailnet this shell cannot see yet. The plugin is inert without a
+# broker, so installing it now and connecting later is fine; only the plugin
+# SOURCE has to come from somewhere, and GitHub can supply that.
+BROKER_UP=0
+if curl -fsS --max-time 10 "$BROKER/v1/health" >/dev/null 2>&1; then
+  BROKER_UP=1
+  echo "    broker reachable"
+else
+  echo "    broker NOT reachable at $BROKER (installing anyway)"
+  if [ "$BROKER" = "http://127.0.0.1:8850" ]; then
+    echo "    NOTE: that is the default. If your broker is elsewhere, pass:" >&2
+    echo "          --broker http://<host>:8850" >&2
+  fi
 fi
-echo "    broker reachable"
 
 # --- 3. install --------------------------------------------------------------
 # On the dev machine the plugin is a symlink to the working tree. Replacing it
@@ -74,17 +90,38 @@ if [ -L "$DEST" ]; then
   echo "    $DEST is a symlink to $(readlink "$DEST")"
   echo "    leaving it alone (this looks like the dev machine)"
 else
+  # Prefer the broker: it serves the exact plugin build it speaks to. Fall back to
+  # GitHub so `curl <raw>/install.sh | bash` is self-sufficient.
   TMPZIP="$(mktemp -t hollerback-XXXXXX.zip)"
-  curl -fsS --max-time 60 "$BROKER/v1/plugin.zip" -o "$TMPZIP" || {
-    echo "    download failed" >&2; exit 1; }
+  SRC_DESC=""
+  if [ "$BROKER_UP" = "1" ] && curl -fsS --max-time 60 "$BROKER/v1/plugin.zip" -o "$TMPZIP" 2>/dev/null; then
+    SRC_DESC="broker"
+  elif curl -fsSL --max-time 90 "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" -o "$TMPZIP.tgz" 2>/dev/null; then
+    SRC_DESC="github ($REPO@$REF)"
+  else
+    echo "    could not fetch the plugin from $BROKER or from GitHub ($REPO@$REF)" >&2
+    echo "    Set HOLLERBACK_REPO=you/hollerback, or run this from a clone." >&2
+    rm -f "$TMPZIP" "$TMPZIP.tgz"; exit 1
+  fi
+
   rm -rf "$DEST"; mkdir -p "$DEST"
-  "$PY" - "$TMPZIP" "$DEST" <<'PYEOF'
+  if [ "$SRC_DESC" = "broker" ]; then
+    "$PY" - "$TMPZIP" "$DEST" <<'PYEOF'
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1]) as z:
     z.extractall(sys.argv[2])
 PYEOF
-  rm -f "$TMPZIP"
-  echo "    installed to $DEST"
+  else
+    # The tarball is the whole repo; the plugin is one directory inside it.
+    TMPX="$(mktemp -d)"
+    tar xzf "$TMPZIP.tgz" -C "$TMPX" --strip-components=1 || {
+      echo "    could not unpack the GitHub tarball" >&2; exit 1; }
+    [ -d "$TMPX/plugin" ] || { echo "    tarball has no plugin/ directory" >&2; exit 1; }
+    cp -R "$TMPX/plugin/." "$DEST/"
+    rm -rf "$TMPX"
+  fi
+  rm -f "$TMPZIP" "$TMPZIP.tgz"
+  echo "    installed to $DEST (from $SRC_DESC)"
 fi
 
 # --- 4. config ---------------------------------------------------------------

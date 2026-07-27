@@ -7,9 +7,14 @@
 
       powershell -ExecutionPolicy Bypass -File uninstall-windows.ps1
       powershell -ExecutionPolicy Bypass -File uninstall-windows.ps1 -PurgeInboxes
+
+  Or straight from GitHub, no download step (needs no broker and no network
+  beyond fetching this file -- it only removes local files):
+
+      & ([scriptblock]::Create((iwr https://raw.githubusercontent.com/dbrentley/hollerback/main/uninstall-windows.ps1 -UseBasicParsing).Content))
 #>
 [CmdletBinding()]
-param([switch]$PurgeInboxes)
+param([switch]$PurgeInboxes, [switch]$KeepWorkspaces)
 
 $ErrorActionPreference = "Stop"
 
@@ -41,9 +46,14 @@ if (Test-Path $SettingsPath) {
   try {
     $s = Get-Content $SettingsPath -Raw | ConvertFrom-Json
     $gone = @()
+    # Match the PLUGIN half of the source id, not the whole string. Config is
+    # keyed "<plugin>@<marketplace>", so the installer writes hollerback@skills-dir
+    # while `claude plugin install` writes hollerback@hollerback, and a fork writes
+    # hollerback@<their-marketplace>. Listing exact ids left marketplace installs
+    # behind on every uninstall.
     if ($s.PSObject.Properties.Name -contains "pluginConfigs") {
-      foreach ($k in @("hollerback@skills-dir", "agentshare@skills-dir")) {
-        if ($s.pluginConfigs.PSObject.Properties.Name -contains $k) {
+      foreach ($k in @($s.pluginConfigs.PSObject.Properties.Name)) {
+        if ($k -match '^(hollerback|agentshare)@') {
           $s.pluginConfigs.PSObject.Properties.Remove($k); $gone += $k
         }
       }
@@ -70,14 +80,33 @@ foreach ($p in @("$env:LOCALAPPDATA\hollerback", "$env:USERPROFILE\.cache\holler
   if (Test-Path $p) { Remove-Item -Recurse -Force $p; Write-Host "    removed $p" -ForegroundColor Green; $removed = $true }
 }
 
+# Workspace identities (.hollerback\agent.json) are config the installer wrote,
+# not data the user created, so they go by default -- otherwise an uninstalled
+# machine keeps silently naming sessions. Received files in the same directory
+# are the user's and survive unless -PurgeInboxes is given.
 if ($PurgeInboxes) {
-  Write-Host "    searching for received-file inboxes ..." -ForegroundColor Cyan
+  Write-Host "    searching for hollerback directories (inboxes included) ..." -ForegroundColor Cyan
   Get-ChildItem -Path $env:USERPROFILE -Recurse -Directory -Force `
       -Include ".hollerback", ".agentshare" -ErrorAction SilentlyContinue -Depth 6 |
     ForEach-Object { Remove-Item -Recurse -Force $_.FullName; Write-Host "      deleted $($_.FullName)" -ForegroundColor DarkGray }
-} else {
+} elseif (-not $KeepWorkspaces) {
+  Write-Host "    searching for workspace agent names ..." -ForegroundColor Cyan
+  $any = $false
+  Get-ChildItem -Path $env:USERPROFILE -Recurse -Directory -Force `
+      -Include ".hollerback", ".agentshare" -ErrorAction SilentlyContinue -Depth 6 |
+    ForEach-Object {
+      $f = Join-Path $_.FullName "agent.json"
+      if (Test-Path $f) {
+        Remove-Item -Force $f
+        Write-Host "      removed $f" -ForegroundColor Green
+        $any = $true; $removed = $true
+      }
+    }
+  if (-not $any) { Write-Host "      none found" -ForegroundColor DarkGray }
   Write-Host "    keeping received files (.hollerback\inbox\ in your projects)" -ForegroundColor DarkGray
   Write-Host "    re-run with -PurgeInboxes to delete those too" -ForegroundColor DarkGray
+} else {
+  Write-Host "    keeping workspace agent names and received files" -ForegroundColor DarkGray
 }
 
 if (-not $removed) { Write-Host "    nothing was installed" -ForegroundColor Yellow }

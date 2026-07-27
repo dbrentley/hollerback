@@ -78,13 +78,28 @@ reboot), and tells you how to run it manually where not.
 ### 2. The plugin, on each session's machine
 
 ```bash
-curl -fsSL http://<broker>:8850/install.sh | bash -s -- --agent backend --broker http://<broker>:8850
+curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/install.sh \
+  | bash -s -- --agent backend --broker http://<broker>:8850
 ```
 
+```powershell
+& ([scriptblock]::Create((iwr https://raw.githubusercontent.com/dbrentley/hollerback/main/install-windows.ps1 -UseBasicParsing).Content)) `
+    -AgentName frontend -Broker http://<broker>:8850
+```
+
+The broker serves the same scripts, if you'd rather not go out to GitHub — and
+that form fills in its own URL, so you can drop `--broker` / `-Broker`:
+
+```bash
+curl -fsSL http://<broker>:8850/install.sh | bash -s -- --agent backend
+```
 ```powershell
 iwr http://<broker>:8850/install.ps1 -OutFile $env:TEMP\hb.ps1
 powershell -ExecutionPolicy Bypass -File $env:TEMP\hb.ps1 -AgentName frontend -Broker http://<broker>:8850
 ```
+
+The plugin comes from the broker when it can be reached and from GitHub when it
+can't, so the install works even if the broker is down or not up yet.
 
 Or through Claude Code's own plugin system:
 
@@ -108,8 +123,22 @@ Two things silently do nothing otherwise:
 
 You should see `1 monitor` in the status line and nine hollerback tools.
 
-Uninstall is `uninstall.sh` / `uninstall-windows.ps1`, served from the broker at
-the same URLs.
+### Uninstall
+
+Needs no broker and no network beyond fetching the script — it only removes local
+files:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/uninstall.sh | bash
+```
+```powershell
+& ([scriptblock]::Create((iwr https://raw.githubusercontent.com/dbrentley/hollerback/main/uninstall-windows.ps1 -UseBasicParsing).Content))
+```
+
+It removes the plugin, every `pluginConfigs` entry hollerback wrote (whichever way
+it was installed), local state, and any workspace agent names. **Files peers sent
+you are kept** — add `--purge-inboxes` / `-PurgeInboxes` to delete those too, or
+`--keep-workspaces` / `-KeepWorkspaces` to leave workspace names in place.
 
 ### Upgrading from `agentshare`
 

@@ -1,17 +1,31 @@
 #!/usr/bin/env bash
 # hollerback — Linux/macOS uninstaller.
 #
-# Removes the plugin, its config entry, and its local state. Does NOT touch the
-# broker (that is a service you installed separately) and does NOT delete files
-# peers sent you -- those live in .hollerback/inbox/ inside your projects and are
-# yours to keep or bin.
+# Removes the plugin, every config entry it wrote, and its local state. Does NOT
+# touch the broker (that is a service you installed separately) and does NOT
+# delete files peers sent you -- those live in .hollerback/inbox/ inside your
+# projects and are yours to keep or bin.
 #
-#   curl -fsSL <broker>/uninstall.sh | bash
-#   ./uninstall.sh --purge-inboxes   # also delete received files under $HOME
+#   curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/uninstall.sh | bash
+#   curl -fsSL <broker>:8850/uninstall.sh | bash
+#   ./uninstall.sh --purge-inboxes    # also delete received files under $HOME
+#   ./uninstall.sh --keep-workspaces  # leave .hollerback/agent.json files alone
+#
+# Needs no broker and no network: it only removes local files.
 set -uo pipefail
 
 PURGE_INBOXES=0
-[ "${1:-}" = "--purge-inboxes" ] && PURGE_INBOXES=1
+KEEP_WORKSPACES=0
+SCAN_DEPTH="${HOLLERBACK_SCAN_DEPTH:-6}"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --purge-inboxes)   PURGE_INBOXES=1; shift ;;
+    --keep-workspaces) KEEP_WORKSPACES=1; shift ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
 
 SKILLS="$HOME/.claude/skills"
 SETTINGS="$HOME/.claude/settings.json"
@@ -43,20 +57,31 @@ except Exception as exc:
     print(f"    settings.json unparseable ({exc}); leaving it alone")
     raise SystemExit(0)
 backup.write_bytes(p.read_bytes())
+
+# Match on the PLUGIN half of the source id, not the whole string. Config is
+# keyed "<plugin>@<marketplace>", so install.sh writes hollerback@skills-dir
+# while `claude plugin install` writes hollerback@hollerback -- and a fork writes
+# hollerback@<their-marketplace>. Listing exact ids left marketplace installs
+# behind on every uninstall.
+def ours(key):
+    return key.split("@")[0] in ("hollerback", "agentshare")
+
 pc = d.get("pluginConfigs", {})
-gone = [k for k in ("hollerback@skills-dir", "agentshare@skills-dir") if k in pc]
+gone = [k for k in list(pc) if ours(k)]
 for k in gone:
     pc.pop(k)
 if not pc:
     d.pop("pluginConfigs", None)
+
 ep = d.get("enabledPlugins", {})
-for k in list(ep):
-    if k.split("@")[0] in ("hollerback", "agentshare"):
-        ep.pop(k)
+gone_ep = [k for k in list(ep) if ours(k)]
+for k in gone_ep:
+    ep.pop(k)
 if not ep:
     d.pop("enabledPlugins", None)
+
 p.write_text(json.dumps(d, indent=2) + "\n", encoding="utf-8")
-print(f"    settings.json: removed {gone or 'nothing'} (backup: {backup.name})")
+print(f"    settings.json: removed {gone + gone_ep or 'nothing'} (backup: {backup.name})")
 PYEOF
 fi
 
@@ -67,13 +92,32 @@ for f in "$HOME/.hollerback.json" "$HOME/.agentshare.json"; do
   [ -f "$f" ] && { echo "    removing $f"; rm -f "$f"; removed=1; }
 done
 
+# Workspace identities (.hollerback/agent.json) are config this installer wrote,
+# not data the user created, so they go by default -- otherwise an uninstalled
+# machine keeps silently naming sessions. Received files in the same directory
+# are the user's and survive unless --purge-inboxes is given.
 if [ "$PURGE_INBOXES" = "1" ]; then
-  echo "    searching \$HOME for received-file inboxes ..."
-  find "$HOME" -maxdepth 6 -type d \( -name .hollerback -o -name .agentshare \) \
-       -not -path "*/.venv/*" -print -exec rm -rf {} + 2>/dev/null | sed 's/^/      deleted /'
-else
+  echo "    searching \$HOME for hollerback directories (inboxes included) ..."
+  find "$HOME" -maxdepth "$SCAN_DEPTH" -type d \( -name .hollerback -o -name .agentshare \) \
+       -not -path "*/.venv/*" -not -path "*/node_modules/*" \
+       -print -exec rm -rf {} + 2>/dev/null | sed 's/^/      deleted /'
+elif [ "$KEEP_WORKSPACES" = "0" ]; then
+  echo "    searching \$HOME for workspace agent names ..."
+  found=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    echo "      removing $f"
+    rm -f "$f"; found=1; removed=1
+  done <<EOT
+$(find "$HOME" -maxdepth "$SCAN_DEPTH" -type f \
+       \( -path "*/.hollerback/agent.json" -o -path "*/.agentshare/agent.json" \) \
+       -not -path "*/.venv/*" -not -path "*/node_modules/*" 2>/dev/null)
+EOT
+  [ "$found" = "0" ] && echo "      none found"
   echo "    keeping received files (.hollerback/inbox/ in your projects)"
   echo "    re-run with --purge-inboxes to delete those too"
+else
+  echo "    keeping workspace agent names and received files"
 fi
 
 [ "$removed" = "0" ] && echo "    nothing was installed"
