@@ -69,11 +69,18 @@ Defaults to `127.0.0.1:8850`, which is all you need if your sessions are on one
 machine. For several machines, bind the private address peers reach you on:
 
 ```bash
-./install-broker.sh --bind 100.64.0.5     # e.g. a Tailscale IP
+curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/install-broker.sh \
+  | bash -s -- --bind 100.64.0.5          # e.g. a Tailscale IP
 ```
 
 It installs a systemd user service where available (surviving logout and
-reboot), and tells you how to run it manually where not.
+reboot), and tells you how to run it manually where not — which includes macOS,
+where you either run it in a terminal or wrap it in a launchd plist. It finishes
+by confirming the *live* broker reports the version it just installed, so an
+upgrade that failed to replace a running process cannot pass silently.
+
+The plugin installer is POSIX shell and works on macOS as-is; the broker needs
+Python 3.11+ there.
 
 ### 2. The plugin, on each session's machine
 
@@ -164,7 +171,11 @@ of silently falling back to defaults. Rename them anyway; the fallback is
 temporary:
 
 ```bash
-sed -i 's/^AGENTSHARE_/HOLLERBACK_/' ~/.config/hollerback/broker.env
+python3 - <<'EOF'
+import pathlib
+p = pathlib.Path.home() / ".config/hollerback/broker.env"
+p.write_text(p.read_text().replace("AGENTSHARE_", "HOLLERBACK_"))
+EOF
 systemctl --user restart hollerback-broker
 ```
 
@@ -215,6 +226,15 @@ Code can `Read` them. A `.gitignore` is written there automatically.
 The broker serves a dashboard at `http://<broker>:8850/` — every session, whether
 it's online, what directory it's working in, what it still owes an answer on, and
 a live feed of questions, answers and files.
+
+**Only connected sessions are shown by default**, with a `show offline (N)` toggle
+— nothing here expires, so every session that ever connected stays in the roster
+and the list would otherwise become mostly history. To drop a dead one for good:
+
+```bash
+curl -s -XPOST http://<broker>:8850/v1/forget \
+  -H 'content-type: application/json' -d '{"agent":"host:old-project"}'
+```
 
 Presence expires on its own rather than relying on a clean disconnect, so a peer
 killed mid-stream stops showing as online instead of lingering forever. If a

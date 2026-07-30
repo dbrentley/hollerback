@@ -7,11 +7,18 @@ A message bus between concurrently-running Claude Code sessions. Two surfaces:
   POST /v1/note            fire-and-forget note, no reply expected
   POST /v1/announce        a session records what it is, for discover()
   POST /v1/forget          drop an agent that will never come back
+  POST /v1/send            dispatches on a 'kind' field; exists for curl testing
+  POST /v1/file            upload a file for a peer (base64 in JSON)
+  GET  /v1/file/{id}       download one, and mark it fetched
+  GET  /v1/message/{id}    full untruncated text of one message
   GET  /v1/stream/{agent}  long-lived SSE feed of that agent's messages
-  GET  /v1/peers           who is online, where, and what they owe answers on
+  GET  /v1/peers           who is online, where, what they do, what they owe
   GET  /v1/pending/{agent} open questions (used by the read-only permission hook)
+  GET  /v1/health          liveness + broker version (unauthenticated)
+  GET  /v1/dashboard       counts, peers and recent messages, for the web page
   GET  /v1/plugin.zip      the plugin, so a peer machine can install without SSH
-  GET  /install.ps1        the Windows installer
+  GET  /                   the dashboard itself
+  GET  /install.sh /install.ps1 /uninstall.sh /uninstall.ps1 /uninstall-broker.sh
 
 Everything durable lives in SQLite (see store.py): the unit is Restart=always,
 so anything held only in memory would vanish on every code change.

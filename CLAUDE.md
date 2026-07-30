@@ -300,6 +300,9 @@ holds received files and self-ignores via a `.gitignore` written on first use.
   5.1 writes a BOM (the env layer needs no decoding). Note `_read_state()` in the
   same file deliberately omits the encoding — it reads our own cache, not a
   PowerShell-written config.
+- **Roster hygiene:** nothing expires, so `POST /v1/forget` is the only way to
+  drop an agent, and the dashboard hides offline peers by default for the same
+  reason. A renamed directory leaves its old id behind forever otherwise.
 - **New broker endpoint:** add the `Route` in `app.py` and gate it with
   `_authorized()` — it is per-handler, not middleware, so a new route is
   unauthenticated until you add the call. Eight routes skip it today — see Security
@@ -317,6 +320,11 @@ holds received files and self-ignores via a `.gitignore` written on first use.
   single-entry definition, and both files parse and pass the shape check. `.mcp.json`
   gets no such rewrite, so on Windows the MCP server still launches via the bare
   `python3` the monitor was pinned to avoid.
+- **The shell installers must run on macOS**, which has BSD userland and no GNU
+  coreutils. No `timeout` (use background + `sleep` + `kill`), no `stat -c`, no
+  `sed -i` without an argument, no `\?` in a `sed` BRE, and `mktemp -t` takes a
+  *prefix* there rather than a template. `timeout` shipped once and broke every
+  macOS install at the smoke test, after everything else had succeeded.
 - **Windows installer JSON:** never build JSON with `ConvertTo-Json` from a
   single-element array (it unrolls to an object), and never `Set-Content -Encoding
   UTF8` (BOM). `install-windows.ps1` uses a here-string plus a no-BOM writer for this.
