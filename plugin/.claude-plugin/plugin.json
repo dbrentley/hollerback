@@ -2,7 +2,7 @@
   "name": "hollerback",
   "displayName": "Hollerback",
   "description": "Ask the other Claude Code session a question and get an answer back, without copy-pasting between terminals.",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "author": {
     "name": "brent"
   },

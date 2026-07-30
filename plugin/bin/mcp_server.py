@@ -561,11 +561,15 @@ def call_tool(name: str, args: dict) -> dict:
                 lines.append("REACHABLE: none. Nobody is connected, so nothing can be sent.")
 
             if offline:
-                lines += ["", f"Not reachable ({len(offline)}) -- listed for context only;"
-                              " sending to these is refused, not queued:"]
+                lines += ["", f"Not reachable ({len(offline)}) -- sending to these is refused,"
+                              " not queued. Shown because what they are is still worth"
+                              " knowing:"]
                 for p in offline:
                     age = int(p["seconds_since_seen"])
                     lines.append(f"  {p['name']}  [offline {age}s]")
+                    cap = (p.get("capabilities") or "").strip()
+                    if cap:
+                        lines.append(f"      {cap}")
 
             lines += ["", "Address a peer by its id, or any unique part of one."]
             if not (me or {}).get("capabilities"):
