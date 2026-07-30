@@ -213,7 +213,7 @@ processes; an old one keeps running against the old broker until its session exi
 | `holler_back(request_id, text)` | Answer a question you were asked. Routed back to whoever asked. |
 | `read_message(message_id)` | Full untruncated text — notifications get clipped for display. |
 | `check_inbox()` | What you owe, what you're waiting on, files not yet saved. |
-| `discover()` | Who exists, what each one *is*, online or not, and what they owe. Call before addressing anyone. |
+| `discover()` | Who exists, what each one *is*, online or not, and what they owe. Also warns if *this* session cannot receive. Call before addressing anyone. |
 | `announce(capabilities)` | Say what this session is. Stored, so sessions starting later still see it. |
 | `tell_peer(peer, note)` | Heads-up, no reply expected. `peer="*"` broadcasts to everyone. |
 | `send_file(peer, path, note?)` | Send a file instead of pasting it into a message. |
@@ -233,9 +233,13 @@ a live feed of questions, answers and files.
 refused, not queued — a message held for a session that never returns leaves the
 asker waiting on an answer nobody is writing.
 
-**Only connected sessions are shown by default**, with a `show offline (N)` toggle
-— nothing here expires, so every session that ever connected stays in the roster
-and the list would otherwise become mostly history. To drop a dead one for good:
+**Only connected sessions are shown by default**, with a `show offline (N)` toggle.
+Ids are per-session, so the roster gains a row for every session ever started and
+would otherwise become mostly history. Disconnected sessions are dropped after 24h
+(`HOLLERBACK_AGENT_TTL_SECS`), and an untagged row is dropped as soon as a newer
+tagged session supersedes it — that row is a leftover from before ids carried a
+session tag, and it is the one a peer would abbreviate to when guessing. To drop
+a live-looking one by hand:
 
 ```bash
 curl -s -XPOST http://<broker>:8850/v1/forget \

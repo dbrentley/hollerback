@@ -38,6 +38,13 @@ matches `ada:optimize`. Matching also looks at what a peer announced, so
 `peer="duty-cycle solver"` finds whoever said that. If it is ambiguous you get the
 candidates back instead of a guess; re-send with a specific id.
 
+**If `discover()` opens with a warning that this session is not connected, say so
+to the user before anything else.** It means this session's monitor is not
+running: hollers can still go out, but no answer, question or file can ever come
+back, so a peer that replies perfectly is replying into nothing. Restarting the
+session normally fixes it; if it does not, the workspace is probably untrusted,
+which skips monitors with no error at all.
+
 ## Asking
 
 `holler(peer, question, context?)` sends a question and **returns

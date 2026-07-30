@@ -126,15 +126,34 @@ echo "    dependencies ready"
 # --- config -----------------------------------------------------------------
 mkdir -p "$HOME/.config/hollerback"
 ENVF="$HOME/.config/hollerback/broker.env"
+# This file is rewritten wholesale on every run, so carry forward the one value
+# that is not derived from flags or defaults. Losing a token here would leave the
+# broker up and unauthenticated while every client kept sending one -- an open
+# port that still looks configured.
+OLD_TOKEN=""
+[ -f "$ENVF" ] && OLD_TOKEN=$(sed -n 's/^HOLLERBACK_TOKEN=//p' "$ENVF" | head -1)
 cat > "$ENVF" <<EOF
-# hollerback broker. There is no auth -- the bind address IS the boundary.
+# hollerback broker. There is no auth by default -- the bind address IS the
+# boundary. Set HOLLERBACK_TOKEN here AND in every plugin config to change that.
 HOLLERBACK_BIND=$BIND
 HOLLERBACK_PORT=$PORT
-HOLLERBACK_TOKEN=
+HOLLERBACK_TOKEN=$OLD_TOKEN
+
+# NOT IMPLEMENTED -- nothing reads this. Sending to a disconnected session is
+# refused, not queued, so there is no backlog to bound.
 HOLLERBACK_BACKLOG_MAX=200
+
+# Must stay well below listen.py's 60s read timeout, or every client falls into
+# a permanent reconnect loop and replays its backlog each cycle.
 HOLLERBACK_KEEPALIVE_SECS=20
+
+# How long a disconnected session lingers in the roster. Ids are per-session,
+# so without reaping the table grows by a row per session ever started.
+HOLLERBACK_AGENT_TTL_SECS=86400
+
 HOLLERBACK_PLUGIN_DIR=$PREFIX/plugin
 EOF
+[ -n "$OLD_TOKEN" ] && echo "    kept existing HOLLERBACK_TOKEN"
 echo "    config: $ENVF"
 
 # --- run it -----------------------------------------------------------------
