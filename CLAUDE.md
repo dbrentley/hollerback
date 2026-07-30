@@ -174,11 +174,14 @@ HOLLERBACK_BIND=127.0.0.1 HOLLERBACK_PORT=8850 .venv/bin/python -m hollerback_br
 Point it at a scratch DB to avoid touching real message history:
 `HOLLERBACK_DB=/tmp/hb-test.db`.
 
-**SIGTERM will not stop it once anything is subscribed.** SSE streams are infinite
-generators, so uvicorn's graceful shutdown waits on them forever: the port closes
-and health checks fail while the process lives on, orphaned to PPID 1 in `ep_poll`.
-Under systemd the unit's `FinalKillSignal=SIGKILL` handles it; by hand you need
-`kill -9`. Always check with `pgrep -af hollerback_broker` rather than trusting a
+**SSE streams never end, so shutdown needs forcing.** uvicorn's graceful path
+waits on those generators forever: the port closes and health checks fail while
+the process lives on. `main()` therefore runs a `uvicorn.Server` subclass whose
+`handle_exit` starts a `HOLLERBACK_SHUTDOWN_GRACE_SECS` (3s) timer and then
+`os._exit(0)`, so Ctrl-C works when running by hand — which is the only option on
+a machine without systemd, macOS included. Under systemd the unit's
+`FinalKillSignal=SIGKILL` covers the same ground. If you bypass `main()`, expect
+the hang back, and check with `pgrep -af hollerback_broker` rather than trusting a
 failed health check to mean "stopped".
 
 ### Exercising the broker without any Claude Code session

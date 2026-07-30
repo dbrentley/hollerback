@@ -779,11 +779,47 @@ app = Starlette(
 )
 
 
+SHUTDOWN_GRACE_SECS = float(os.getenv("HOLLERBACK_SHUTDOWN_GRACE_SECS", "3"))
+
+
 def main() -> None:
+    import threading
+
     import uvicorn
 
+    class _Server(uvicorn.Server):
+        """uvicorn, but Ctrl-C actually ends it.
+
+        SSE streams are infinite async generators, so the graceful shutdown path
+        waits on them forever: the port closes and health checks start failing
+        while the process lives on. Under systemd the unit's FinalKillSignal
+        covers that, but run by hand -- which is how this is started on any
+        machine without systemd, macOS included -- Ctrl-C simply appears to hang
+        and you are left finding the pid yourself.
+
+        So: try graceful, and if the loop has not exited shortly after, stop
+        waiting on connections that by construction never end.
+        """
+
+        def handle_exit(self, sig, frame) -> None:  # noqa: ANN001
+            super().handle_exit(sig, frame)
+            t = threading.Timer(
+                SHUTDOWN_GRACE_SECS,
+                lambda: (
+                    print(
+                        f"[hollerback] shutdown: {SHUTDOWN_GRACE_SECS:g}s elapsed with "
+                        f"streams still open; exiting anyway. Nothing is lost -- state "
+                        f"is in SQLite and clients reconnect on their own.",
+                        file=sys.stderr, flush=True,
+                    ),
+                    os._exit(0),
+                ),
+            )
+            t.daemon = True
+            t.start()
+
     store.init()
-    uvicorn.run(app, host=BIND, port=PORT, log_level="info")
+    _Server(uvicorn.Config(app, host=BIND, port=PORT, log_level="info")).run()
 
 
 if __name__ == "__main__":
