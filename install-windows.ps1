@@ -97,7 +97,28 @@ if ($srcDesc -eq "broker") {
   Remove-Item -Recurse -Force $tmpX
 }
 Remove-Item $tmpZip -Force
-Write-Host "    installed to $Dest (from $srcDesc)" -ForegroundColor Green
+$PluginVersion = "unknown"
+try {
+  $PluginVersion = (Get-Content (Join-Path $Dest ".claude-plugin\plugin.json") -Raw | ConvertFrom-Json).version
+} catch { }
+Write-Host "    installed to $Dest (hollerback $PluginVersion, from $srcDesc)" -ForegroundColor Green
+
+# The two halves deploy separately and drift; say so rather than let a stale
+# broker pass silently.
+try {
+  $bv = (Invoke-RestMethod -Uri "$Broker/v1/health" -TimeoutSec 10).version
+  if (-not $bv) {
+    Write-Host "    NOTE: broker predates version reporting; plugin is $PluginVersion." -ForegroundColor Yellow
+    Write-Host "          Re-run install-broker.sh so both halves match." -ForegroundColor Yellow
+  } elseif ($bv -ne $PluginVersion) {
+    Write-Host "    WARNING: plugin $PluginVersion vs broker $bv -- different commits." -ForegroundColor Yellow
+    Write-Host "          Re-run install-broker.sh on the broker machine." -ForegroundColor Yellow
+  } else {
+    Write-Host "    versions match (plugin and broker both $PluginVersion)" -ForegroundColor Green
+  }
+} catch {
+  Write-Host "    plugin $PluginVersion; broker unreachable, cannot compare versions" -ForegroundColor Yellow
+}
 
 # --- 4. pin the monitor to the absolute interpreter -------------------------
 # Claude Code refuses to arm a monitor whose command contains ${user_config.*},

@@ -91,6 +91,16 @@ else
 fi
 [ -f "$SRC/broker/pyproject.toml" ] || { echo "    $SRC is not a hollerback checkout" >&2; exit 1; }
 
+# What we are about to install, so a stale source is visible before it is deployed.
+VERSION="$("$PY" - "$SRC/broker/hollerback_broker/__init__.py" <<'VEOF'
+import pathlib, re, sys
+src = pathlib.Path(sys.argv[1]).read_text()
+m = re.search(r'__version__\s*=\s*"([^"]+)"', src)
+print(m.group(1) if m else "unknown")
+VEOF
+)"
+echo "    version: $VERSION"
+
 # --- install into its own prefix, independent of the checkout ---------------
 mkdir -p "$PREFIX"
 rm -rf "$PREFIX/broker"
@@ -100,7 +110,7 @@ rm -rf "$PREFIX/broker/.venv"
 for f in plugin install.sh install-windows.ps1 uninstall.sh uninstall-windows.ps1 uninstall-broker.sh; do
   [ -e "$SRC/$f" ] && cp -R "$SRC/$f" "$PREFIX/"
 done
-echo "    installed to $PREFIX"
+echo "    installed to $PREFIX (hollerback $VERSION)"
 
 if command -v uv >/dev/null 2>&1; then
   (cd "$PREFIX/broker" && uv sync --quiet) || { echo "    uv sync failed" >&2; exit 1; }
@@ -192,12 +202,15 @@ else
         set -a; . $ENVF; set +a
         $VENV_PY -m hollerback_broker.app
     (macOS: wrap that in a launchd plist, or just run it in a terminal.)
+
+    Then confirm the running broker is the code just installed ($VERSION):
+        curl -s http://$BIND:$PORT/v1/health
 EOF
 fi
 
 cat <<EOF
 
-Broker:    http://$BIND:$PORT
+Broker:    http://$BIND:$PORT   (hollerback $VERSION)
 Dashboard: http://$BIND:$PORT/          <- who is on the network
 
 Now install the plugin on each session's machine -- once per machine, nothing

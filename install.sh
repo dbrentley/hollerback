@@ -123,7 +123,15 @@ ZIPEOF
     rm -rf "$TMPX"
   fi
   rm -f "$TMPZIP" "$TMPZIP.tgz"
-  echo "    installed to $DEST (from $SRC_DESC)"
+  PLUGIN_VERSION="$("$PY" - "$DEST/.claude-plugin/plugin.json" <<'VEOF'
+import json, pathlib, sys
+try:
+    print(json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8-sig")).get("version", "unknown"))
+except Exception:
+    print("unknown")
+VEOF
+)"
+  echo "    installed to $DEST (hollerback $PLUGIN_VERSION, from $SRC_DESC)"
 fi
 
 # --- 4. config ---------------------------------------------------------------
@@ -174,7 +182,9 @@ PYEOF
 # --- 5b. broker/plugin version handshake -------------------------------------
 # The two halves are deployed separately, so they drift. Silence here is how a
 # fresh installer ends up paired with a plugin from another commit.
-if [ "$BROKER_UP" = "1" ]; then
+if [ "$BROKER_UP" != "1" ]; then
+  echo "    plugin ${PLUGIN_VERSION:-unknown}; broker unreachable, cannot compare versions"
+else
   "$PY" - "$DEST/.claude-plugin/plugin.json" "$BROKER" <<'VEOF'
 import json, pathlib, sys, urllib.request
 mine = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8-sig")).get("version", "?")
