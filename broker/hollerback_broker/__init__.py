@@ -1,9 +1,15 @@
-"""hollerback broker package."""
+"""hollerback broker package.
+
+Bump __version__ (and plugin.json to match) whenever the wire behaviour the
+plugin depends on changes. install.sh compares the two and says so when they
+differ; leaving it alone after a behaviour change makes that check report a
+match against a broker that predates the change.
+"""
 
 import os
 import sys
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 _LEGACY_PREFIX = "AGENTSHARE_"
 _PREFIX = "HOLLERBACK_"
