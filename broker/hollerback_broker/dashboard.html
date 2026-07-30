@@ -99,6 +99,12 @@
   .k-file     { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
   .open { color: var(--warning); font-weight: 600; font-size: 11px; white-space: nowrap; }
   .empty { padding: 28px 16px; text-align: center; color: var(--muted); }
+  .sechead { display: flex; align-items: baseline; gap: 10px; margin: 28px 0 10px; }
+  .sechead h2 { margin: 0; }
+  .toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+            color: var(--muted); font-size: 12px; cursor: pointer; user-select: none; }
+  .toggle input { accent-color: var(--accent); cursor: pointer; margin: 0; }
+  .toggle[hidden] { display: none; }
 </style>
 
 <div class="wrap">
@@ -110,7 +116,12 @@
 
   <div class="tiles" id="tiles"></div>
 
-  <h2>Sessions</h2>
+  <div class="sechead">
+    <h2>Sessions</h2>
+    <label class="toggle" id="offlinetoggle" hidden>
+      <input type="checkbox" id="showoffline"> show offline (<span id="offlinecount">0</span>)
+    </label>
+  </div>
   <div class="peers" id="peers"></div>
 
   <h2>Recent activity</h2>
@@ -152,10 +163,39 @@ function tiles(c) {
      <div class="k">${esc(i.k)}</div><div class="n">${esc(i.n)}</div></div>`).join("");
 }
 
+// Offline sessions are hidden by default. Nothing expires here, so every session
+// that has ever connected stays in the roster forever -- after a while the list is
+// mostly history, and the thing you actually came to see is who is reachable now.
+// The count stays visible so hidden peers are never a surprise.
+let SHOW_OFFLINE = localStorage.getItem("hb.showOffline") === "1";
+let LAST_PEERS = [];
+
+const offlineBox = document.getElementById("showoffline");
+offlineBox.checked = SHOW_OFFLINE;
+offlineBox.addEventListener("change", () => {
+  SHOW_OFFLINE = offlineBox.checked;
+  localStorage.setItem("hb.showOffline", SHOW_OFFLINE ? "1" : "0");
+  peers(LAST_PEERS);          // re-render now rather than waiting for the next poll
+});
+
 function peers(list) {
+  LAST_PEERS = list;
   const el = document.getElementById("peers");
+  const offline = list.filter(p => !p.online);
+
+  document.getElementById("offlinecount").textContent = offline.length;
+  document.getElementById("offlinetoggle").hidden = offline.length === 0;
+
   if (!list.length) { el.innerHTML = `<div class="empty">No sessions have connected yet.</div>`; return; }
-  el.innerHTML = list.map(p => {
+
+  const shown = SHOW_OFFLINE ? list : list.filter(p => p.online);
+  if (!shown.length) {
+    el.innerHTML = `<div class="empty">No sessions connected right now.` +
+      (offline.length ? ` ${offline.length} offline — tick “show offline” to see ${offline.length === 1 ? "it" : "them"}.` : "") +
+      `</div>`;
+    return;
+  }
+  el.innerHTML = shown.map(p => {
     const on = p.online;
     return `<div class="peer">
       <div class="top">
