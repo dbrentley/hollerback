@@ -223,6 +223,25 @@ processes; an old one keeps running against the old broker until its session exi
 Received files land in `.hollerback/inbox/` **inside your project**, so Claude
 Code can `Read` them. A `.gitignore` is written there automatically.
 
+## When it isn't working
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/doctor.py | python3
+```
+
+Run it **from the workspace that is misbehaving** — trust, the derived id and the
+project config layer all depend on the directory. It reads and reports, changes
+nothing, and needs no install. It checks the things that fail silently: whether
+the workspace is trusted (inherited from parent directories, so the flag on the
+directory itself proves nothing), whether a monitor is actually running, whether
+`monitors.json` is still an array, whether the plugin and broker versions agree,
+and whether any peer id carries a session tag.
+
+Two failures it exists for, because neither is visible from inside a session:
+a plugin and broker on different versions answer every call normally and only
+differ in wire behaviour, and a session whose monitor never armed can send
+perfectly well while being unable to receive anything at all.
+
 ## Watching it
 
 The broker serves a dashboard at `http://<broker>:8850/` — every session, whether
