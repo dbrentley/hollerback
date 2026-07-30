@@ -104,6 +104,40 @@ else:
     if not (plugin / "bin" / "listen.py").is_file():
         say(BAD, "listen.py missing", "the monitor has nothing to run")
 
+    # Can the monitor COMMAND actually run? Claude Code spawns it with its own
+    # environment, not your interactive shell -- so a python3 that only exists
+    # because .zshrc puts Homebrew on PATH is not necessarily there. On macOS
+    # /usr/bin/python3 can also be a stub that defers to the Command Line Tools
+    # and fails when nothing can prompt for them.
+    try:
+        cmd = next((m.get("command", "") for m in read_json(mon)
+                    if isinstance(m, dict)), "")
+        if cmd:
+            say(INFO, f"monitor command: {cmd}")
+        interp = cmd.split()[0] if cmd else "python3"
+        r = subprocess.run(["/bin/sh", "-c", f"command -v {interp}"],
+                           capture_output=True, text=True, timeout=15)
+        found = r.stdout.strip()
+        if not found:
+            say(BAD, f"'{interp}' is NOT on the default PATH",
+                "your shell finds it, but the environment Claude Code spawns the\n"
+                "           monitor in does not -- so the monitor dies instantly and\n"
+                "           silently. Pin an absolute interpreter in monitors.json.")
+        else:
+            v = subprocess.run([found, "-c", "import sys;print('.'.join(map(str,sys.version_info[:3])))"],
+                               capture_output=True, text=True, timeout=30)
+            ver = v.stdout.strip()
+            if v.returncode != 0:
+                say(BAD, f"'{found}' exists but fails to run",
+                    (v.stderr.strip() or "no output")[:300] +
+                    "\n           On macOS this is usually the Command Line Tools stub.")
+            elif tuple(int(x) for x in ver.split(".")[:2]) < (3, 8):
+                say(BAD, f"monitor would use {found} ({ver})", "the plugin needs 3.8+")
+            else:
+                say(OK, f"monitor interpreter: {found} ({ver})")
+    except Exception as exc:  # noqa: BLE001
+        say(WARN, "could not verify the monitor interpreter", str(exc))
+
     # Does this install predate the per-session identity work?
     try:
         common = (plugin / "bin" / "_common.py").read_text(encoding="utf-8", errors="replace")
