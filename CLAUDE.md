@@ -346,9 +346,20 @@ holds received files and self-ignores via a `.gitignore` written on first use.
   5.1 writes a BOM (the env layer needs no decoding). Note `_read_state()` in the
   same file deliberately omits the encoding — it reads our own cache, not a
   PowerShell-written config.
-- **Roster hygiene:** nothing expires, so `POST /v1/forget` is the only way to
-  drop an agent, and the dashboard hides offline peers by default for the same
-  reason. A renamed directory leaves its old id behind forever otherwise.
+- **Roster hygiene:** ids are per-session, so the table grows by one row per
+  session ever started and eviction is not optional. `reap_agents()` drops anything
+  offline past `HOLLERBACK_AGENT_TTL_SECS` (24h); `reap_superseded()` additionally
+  drops a bare id the moment a *newer* `base#tag` sibling exists, because that row
+  is a pre-tag corpse and the bare id is exactly what someone abbreviates to when
+  guessing. Both run at startup and on every attach. `POST /v1/forget` remains for
+  dropping one by hand. Messages are never reaped — only agent rows.
+- **`online` means a live SSE stream, nothing else.** `connected=1` is written only
+  by the stream handler; `announce()` inserts `connected=0`. Since announce now
+  sends a session id too, a row with a populated `session_id` does **not** imply a
+  connection — that combination reads as a bug and is not one. `discover()` says so
+  outright when the calling session is not itself online, because a session whose
+  monitor is not running can send but can never receive, and nothing else surfaces
+  that.
 - **New broker endpoint:** add the `Route` in `app.py` and gate it with
   `_authorized()` — it is per-handler, not middleware, so a new route is
   unauthenticated until you add the call. Eight routes skip it today — see Security

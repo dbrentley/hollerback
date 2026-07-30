@@ -27,6 +27,11 @@ DB_PATH = pathlib.Path(
 # says. Without this, a broker killed mid-stream leaves the flag set and the peer
 # reads "online" forever.
 KEEPALIVE_SECS = int(os.getenv("HOLLERBACK_KEEPALIVE_SECS", "20"))
+# Ids are per-session now, so the roster grows by one row per session ever
+# started. Nothing can be sent to a disconnected agent, so an old row is pure
+# history -- and a plausible-looking dead peer is worse than no peer at all,
+# because it is exactly what someone abbreviates to when guessing an id.
+AGENT_TTL_SECS = float(os.getenv("HOLLERBACK_AGENT_TTL_SECS", str(24 * 3600)))
 PRESENCE_GRACE_SECS = float(
     os.getenv("HOLLERBACK_PRESENCE_GRACE_SECS", str(max(2 * KEEPALIVE_SECS + 5, 30)))
 )
@@ -394,6 +399,50 @@ def touch_agent(
             "  host=CASE WHEN excluded.host!='' THEN excluded.host ELSE agents.host END",
             (name, session_id, cwd, host, now, 1 if connected else 0),
         )
+
+
+def reap_agents(ttl: float = None) -> list:
+    """Drop agents that have been gone longer than the TTL. Messages are kept."""
+    ttl = AGENT_TTL_SECS if ttl is None else ttl
+    if ttl <= 0:
+        return []
+    cutoff = time.time() - ttl
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT name FROM agents WHERE connected=0 AND last_seen < ?", (cutoff,)
+        ).fetchall()
+        if rows:
+            c.execute("DELETE FROM agents WHERE connected=0 AND last_seen < ?", (cutoff,))
+    return [r["name"] for r in rows]
+
+
+def reap_superseded() -> list:
+    """Drop a bare id that a tagged variant of itself has replaced.
+
+    Ids gained a per-session tag, so every pre-tag row is a corpse of a session
+    that is now running as base#tag. Waiting out the TTL is too slow for that: the
+    bare id is the one a peer abbreviates to when guessing, so a dead 'host:proj'
+    sitting beside a live 'host:proj#7ca2' is the most misleading row in the table.
+
+    Only ever removes an offline bare id that a NEWER tagged sibling supersedes, so
+    a session legitimately running without a session id is left alone.
+    """
+    with _conn() as c:
+        rows = c.execute("SELECT name, last_seen, connected FROM agents").fetchall()
+    tagged = {}
+    for r in rows:
+        if "#" in r["name"]:
+            base = r["name"].split("#", 1)[0]
+            tagged[base] = max(tagged.get(base, 0), r["last_seen"])
+    gone = [
+        r["name"] for r in rows
+        if "#" not in r["name"] and not r["connected"]
+        and r["name"] in tagged and tagged[r["name"]] > r["last_seen"]
+    ]
+    if gone:
+        with _conn() as c:
+            c.executemany("DELETE FROM agents WHERE name=?", [(n,) for n in gone])
+    return gone
 
 
 def forget_agent(name: str) -> bool:

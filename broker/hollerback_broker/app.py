@@ -581,6 +581,10 @@ async def stream(request: Request) -> Response:
             cwd=qp.get("cwd", ""),
             host=qp.get("host", ""),
         )
+        # Cheap and bounded, and this is the moment the roster is about to be
+        # read by a human or a model.
+        for dead in store.reap_agents() + store.reap_superseded():
+            print(f"[hollerback] reaped stale agent {dead!r}", file=sys.stderr, flush=True)
         # Anything queued while this agent had no session connected.
         for msg in store.take_undelivered(agent):
             queue.put_nowait(msg)
@@ -821,6 +825,8 @@ def main() -> None:
             t.start()
 
     store.init()
+    for dead in store.reap_agents() + store.reap_superseded():
+        print(f"[hollerback] reaped stale agent {dead!r}", file=sys.stderr, flush=True)
     try:
         _Server(uvicorn.Config(app, host=BIND, port=PORT, log_level="info")).run()
     except KeyboardInterrupt:

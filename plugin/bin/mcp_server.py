@@ -523,28 +523,52 @@ def call_tool(name: str, args: dict) -> dict:
             if not r.get("ok"):
                 return _err(f"could not reach the broker: {r.get('error', 'unknown error')}")
             rows = list(r.get("peers", []))
-            # Always lead with your own id. It is derived, not configured, so this
-            # is the only place a session can find out what peers will call it.
+            online = [p for p in rows if p["online"]]
+            offline = [p for p in rows if not p["online"]]
+            me = next((p for p in rows if p["name"] == AGENT), None)
+
             lines = [f"You are '{AGENT}'.", ""]
-            if not rows:
+            # The single most useful thing this tool can tell you, and it is not
+            # obvious: presence comes from the monitor's connection, so if this
+            # session is not listed online its monitor is not running -- it can
+            # send, but nothing can ever reach it.
+            if not me or not me["online"]:
                 lines += [
-                    "No sessions have connected to this broker yet.",
-                    "Call announce() anyway -- it is stored, so peers starting later",
-                    "will still see what you are.",
+                    "WARNING: this session is NOT connected. Its monitor (listen.py) is",
+                    "not running, so you can send but can receive nothing -- no answers,",
+                    "no questions, no files. Restart the session; if that does not fix it,",
+                    "the workspace may be untrusted, which skips monitors silently.",
+                    "",
                 ]
+            if not rows:
+                lines += ["No sessions have connected to this broker yet.",
+                          "Call announce() anyway -- it is stored, so peers starting later",
+                          "will still see what you are."]
                 return _ok("\n".join(lines))
-            for p in rows:
-                me = "  (this session)" if p["name"] == AGENT else ""
-                state = "online" if p["online"] else f"offline {int(p['seconds_since_seen'])}s"
-                owes = f", owes {p['open_questions']} answer(s)" if p["open_questions"] else ""
-                lines.append(f"{p['name']}  [{state}{owes}]{me}")
-                cap = (p.get("capabilities") or "").strip()
-                lines.append(f"    {cap}" if cap else
-                             "    (has not announced -- unknown what it does)")
-                if p.get("cwd"):
-                    lines.append(f"    dir: {p['cwd']}")
+
+            if online:
+                lines.append(f"REACHABLE ({len(online)}):")
+                for p in online:
+                    me_tag = "  (this session)" if p["name"] == AGENT else ""
+                    owes = f", owes {p['open_questions']}" if p["open_questions"] else ""
+                    lines.append(f"  {p['name']}  [online{owes}]{me_tag}")
+                    cap = (p.get("capabilities") or "").strip()
+                    lines.append(f"      {cap}" if cap else
+                                 "      (has not announced -- unknown what it does)")
+                    if p.get("cwd"):
+                        lines.append(f"      dir: {p['cwd']}")
+            else:
+                lines.append("REACHABLE: none. Nobody is connected, so nothing can be sent.")
+
+            if offline:
+                lines += ["", f"Not reachable ({len(offline)}) -- listed for context only;"
+                              " sending to these is refused, not queued:"]
+                for p in offline:
+                    age = int(p["seconds_since_seen"])
+                    lines.append(f"  {p['name']}  [offline {age}s]")
+
             lines += ["", "Address a peer by its id, or any unique part of one."]
-            if not (next((p for p in rows if p["name"] == AGENT), {}) or {}).get("capabilities"):
+            if not (me or {}).get("capabilities"):
                 lines.append("You have not announced yet -- peers cannot see what you do.")
             return _ok("\n".join(lines))
 
