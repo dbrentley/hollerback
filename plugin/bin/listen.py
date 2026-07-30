@@ -141,7 +141,7 @@ def format_message(msg: dict) -> str:
     return line
 
 
-def stream_once(url: str, token: str, on_connect=None) -> None:
+def stream_once(url: str, token: str, on_connect=None, identity=None) -> None:
     """Consume one SSE connection until it drops. Raises on connection error."""
     req = urllib.request.Request(url, headers={"Accept": "text/event-stream"})
     if token:
@@ -154,6 +154,15 @@ def stream_once(url: str, token: str, on_connect=None) -> None:
         for raw in resp:
             line = raw.decode("utf-8", "replace").rstrip("\r\n")
             if not line or line.startswith(":"):
+                # The preamble carries the name the broker actually filed us
+                # under, which differs from the one we asked for when another
+                # session already holds it. Trust the broker: it decides
+                # atomically, we cannot.
+                if "hollerback connected as " in line:
+                    assigned = line.split("hollerback connected as ", 1)[1].strip()
+                    if assigned and assigned != identity[0]:
+                        identity[0] = assigned
+                        log(f"identity: {assigned} (assigned by the broker)")
                 continue  # keepalive / comment
             if not line.startswith("data:"):
                 continue
@@ -199,7 +208,10 @@ def main() -> int:
             "session_id": os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
         }
     )
-    url = f"{broker}/v1/stream/{urllib.parse.quote(agent)}?{params}"
+    # claim=1 tells the broker we understand being reassigned; without it, it
+    # leaves the name alone for older clients.
+    url = f"{broker}/v1/stream/{urllib.parse.quote(agent)}?{params}&claim=1"
+    identity = [agent]
     # Log the id verbatim. It is percent-encoded in the URL (':' -> '%3A'), and
     # anything reading it back out of there reports a name that does not exist.
     log(f"identity: {agent}")
@@ -232,7 +244,7 @@ def main() -> int:
 
     while True:
         try:
-            stream_once(url, token, on_connect=announce_recovery)
+            stream_once(url, token, on_connect=announce_recovery, identity=identity)
             backoff = RECONNECT_MIN
             announced_outage = False
             if down_since[0] is None:

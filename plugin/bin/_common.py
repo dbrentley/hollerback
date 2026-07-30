@@ -10,6 +10,7 @@ import socket
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 PLUGIN_SOURCE = "hollerback@skills-dir"
@@ -187,41 +188,47 @@ def instance_tag() -> str:
 
 
 def resolve_agent_id(cfg: dict) -> str:
-    """The base id, or base#tag when another live session already holds it.
+    """The name the broker assigned this session, falling back to the base id.
 
-    Two sessions in the same directory derive the same <host>:<dir> and then both
-    receive every question addressed to it -- so both answer, and the asker gets
-    two replies to one request_id. Suffixing unconditionally would fix that and
-    break more: session ids change every launch, so the id would stop being
-    stable, and a stable id is what makes announcements persist and lets you
-    address a peer at all.
+    Duplicate detection lives in the broker, not here. Two sessions in one
+    directory derive the same <host>:<dir>; deciding client-side which of them is
+    "the duplicate" means reading /v1/peers and then acting on it, and two
+    sessions starting together both read "free" and both claim it. The broker can
+    check and claim in one turn of its event loop, so it is the only place that
+    can answer correctly.
 
-    So only the *duplicate* is suffixed. The first session in a directory keeps
-    the plain id; a second concurrent one becomes base#tag for as long as it runs.
-
-    Both the monitor and the stdio MCP server call this. They are separate
-    processes, but both see the same CLAUDE_CODE_SESSION_ID and ask the same
-    broker, so they derive the same answer without coordinating.
+    The monitor's connection makes the claim; this reads the answer back by
+    session id so the stdio MCP server agrees without a second race. If the
+    monitor has not connected yet -- or at all -- this returns the base id, which
+    is also the right answer: a session with no monitor cannot receive anything,
+    so it has nothing to collide over.
 
     Deliberately NOT part of load_config(): the PreToolUse hook calls that before
     every Read, and it must never touch the network.
     """
     base = cfg.get("agent") or ""
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-    # An explicitly pinned name is the operator's choice; do not second-guess it.
     if not base or not sid or os.environ.get("HOLLERBACK_AGENT") or not cfg.get("broker"):
         return base
     try:
-        peers = http_json(f"{cfg['broker']}/v1/peers", None, cfg.get("token", ""), timeout=5)
+        r = http_json(
+            f"{cfg['broker']}/v1/whoami?session_id={urllib.parse.quote(sid, safe='')}",
+            None, cfg.get("token", ""), timeout=5,
+        )
     except Exception:  # noqa: BLE001 - never block startup on the broker
         return base
-    for p in peers.get("peers", []):
-        if (p.get("name") == base and p.get("online")
-                and p.get("session_id") and p["session_id"] != sid):
-            tag = instance_tag()
-            if tag:
-                log(f"'{base}' is already live in another session; using {base}#{tag}")
-                return f"{base}#{tag}"
+    assigned = (r or {}).get("agent")
+    # Only adopt a name that is OUR base, or our base plus a tag. The broker keys
+    # assignments by session id, and if that ever maps to a different workspace --
+    # a reused id, a copied env, a stale record -- adopting it would silently make
+    # this session answer as another one. Distrusting it costs nothing: the base is
+    # always a correct answer for a session nobody else is holding.
+    if assigned and (assigned == base or assigned.startswith(base + "#")):
+        if assigned != base:
+            log(f"broker assigned this session {assigned} (another holds {base})")
+        return assigned
+    if assigned:
+        log(f"ignoring broker id {assigned!r}: not this workspace ({base})")
     return base
 
 

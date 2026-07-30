@@ -46,7 +46,28 @@ PROTOCOL_VERSION = "2024-11-05"
 MAX_FILE_BYTES = int(os.environ.get("HOLLERBACK_MAX_FILE_BYTES", str(10 * 1024 * 1024)))
 
 CFG = load_config()
-AGENT = resolve_agent_id(CFG)
+BASE_AGENT = CFG["agent"]
+AGENT = BASE_AGENT          # refreshed per call; see agent_id()
+_RESOLVED: list = [None]
+
+
+def agent_id() -> str:
+    """This session's id, as the broker filed it.
+
+    Resolved lazily rather than at import: this process and the monitor are
+    spawned together, so at import time the monitor may not have claimed a name
+    yet. While the answer is still the base id we keep asking, because a suffix
+    can appear the moment a second session in this directory connects. Once a
+    suffix comes back it is stable for the life of the session, so cache it.
+    """
+    if _RESOLVED[0]:
+        return _RESOLVED[0]
+    name = resolve_agent_id(CFG) or BASE_AGENT
+    if name != BASE_AGENT:
+        _RESOLVED[0] = name
+    return name
+
+
 BROKER = CFG["broker"]
 TOKEN = CFG["token"]
 
@@ -292,6 +313,8 @@ def _err(text: str) -> dict:
 
 
 def call_tool(name: str, args: dict) -> dict:
+    global AGENT
+    AGENT = agent_id()
     if not BROKER:
         # AGENT cannot be missing -- it is derived. Only the broker URL can be.
         return _err(

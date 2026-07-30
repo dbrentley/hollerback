@@ -7,6 +7,7 @@ A message bus between concurrently-running Claude Code sessions. Two surfaces:
   POST /v1/note            fire-and-forget note, no reply expected
   POST /v1/announce        a session records what it is, for discover()
   POST /v1/forget          drop an agent that will never come back
+  GET  /v1/whoami          the name assigned to a Claude Code session id
   POST /v1/send            dispatches on a 'kind' field; exists for curl testing
   POST /v1/file            upload a file for a peer (base64 in JSON)
   GET  /v1/file/{id}       download one, and mark it fetched
@@ -32,6 +33,7 @@ import io
 import json
 import os
 import pathlib
+import hashlib
 import re
 import sys
 import time
@@ -62,6 +64,30 @@ _ZIP_SKIP = {"__pycache__", ".git", ".venv", ".DS_Store"}
 
 # agent -> live subscriber queues (brief overlap is normal on reconnect)
 _subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
+# agent -> the Claude Code session ids currently holding it, and session id ->
+# the name it was assigned. Both exist to make duplicate detection ATOMIC.
+# The client cannot do this: two sessions starting together both read /v1/peers,
+# both see the base free, and both claim it. Here the check and the claim happen
+# in one turn of a single-threaded event loop with no await between them, so
+# whoever arrives second genuinely sees the first.
+_stream_sids: dict[str, set[str]] = defaultdict(set)
+_assigned: dict[str, str] = {}
+
+
+def _instance_tag(session_id: str) -> str:
+    return hashlib.sha1(session_id.encode()).hexdigest()[:4]
+
+
+def _claim_name(requested: str, session_id: str) -> str:
+    """Assign this connection a name, suffixing only a genuine duplicate."""
+    if not session_id:
+        return requested                      # nothing to tell sessions apart by
+    if session_id in _stream_sids.get(requested, ()):
+        return requested                      # my own reconnect
+    others = _stream_sids.get(requested)
+    if not others:
+        return requested                      # free
+    return f"{requested}#{_instance_tag(session_id)}"
 
 
 def _authorized(request: Request) -> bool:
@@ -193,6 +219,20 @@ def _ambiguous(target: str, candidates: list) -> str:
         f"{target!r} does not identify one peer. Call discover() and use an id "
         f"from it. Closest matches:\n{listing}"
     )
+
+
+async def whoami(request: Request) -> JSONResponse:
+    """The name assigned to a Claude Code session id, if its monitor is connected.
+
+    The monitor and the stdio MCP server are separate processes. Rather than have
+    both guess and hope they agree, the monitor's connection is what claims a
+    name, and the MCP server reads the answer back by session id.
+    """
+    if not _authorized(request):
+        return _unauth()
+    sid = request.query_params.get("session_id", "").strip()
+    name = _assigned.get(sid) if sid else None
+    return JSONResponse({"ok": True, "session_id": sid, "agent": name})
 
 
 async def forget(request: Request) -> JSONResponse:
@@ -505,12 +545,20 @@ async def message(request: Request) -> JSONResponse:
 async def stream(request: Request) -> Response:
     if not _authorized(request):
         return _unauth()
-    agent = request.path_params["agent"]
+    requested = request.path_params["agent"]
     qp = request.query_params
+    sid = qp.get("session_id", "")
+    # Opt-in: only clients that say claim=1 understand a reassigned name. An older
+    # listen.py would keep using the base id while the broker filed it under a
+    # suffix, which is worse than the collision it fixes.
+    agent = _claim_name(requested, sid) if qp.get("claim") == "1" else requested
     queue: asyncio.Queue = asyncio.Queue()
 
     async def events():
         _subscribers[agent].add(queue)
+        if sid:
+            _stream_sids[agent].add(sid)
+            _assigned[sid] = agent
         # Ids are <host>:<dirname>, so two repos with the same folder name on one
         # machine collide -- and the second session silently joins the first one's
         # inbox. The broker is the only place that can see both.
@@ -548,7 +596,9 @@ async def stream(request: Request) -> Response:
                       f"it -- re-run the installer."),
             ))
         try:
-            yield b": hollerback connected\n\n"
+            # The client reads its assigned name from here; it may differ from
+            # what it asked for.
+            yield f": hollerback connected as {agent}\n\n".encode()
             while True:
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_SECS)
@@ -560,6 +610,12 @@ async def stream(request: Request) -> Response:
                 yield f"data: {json.dumps(msg, separators=(',', ':'))}\n\n".encode()
         finally:
             _subscribers[agent].discard(queue)
+            if sid:
+                _stream_sids[agent].discard(sid)
+                if not _stream_sids[agent]:
+                    _stream_sids.pop(agent, None)
+                if _assigned.get(sid) == agent:
+                    _assigned.pop(sid, None)
             if not _subscribers[agent]:
                 _subscribers.pop(agent, None)
                 store.touch_agent(agent, connected=False)
@@ -705,6 +761,7 @@ app = Starlette(
         Route("/v1/note", note, methods=["POST"]),
         Route("/v1/announce", announce, methods=["POST"]),
         Route("/v1/forget", forget, methods=["POST"]),
+        Route("/v1/whoami", whoami),
         Route("/v1/send", send, methods=["POST"]),
         Route("/v1/pending/{agent}", pending),
         Route("/v1/message/{id}", message),

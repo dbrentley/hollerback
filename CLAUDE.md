@@ -100,13 +100,26 @@ Break any of these and the failure is silent, not loud.
   `_subscribers` set, not the stored flag, because the flag can lag a hard drop.
   The old behaviour queued indefinitely, which paired badly with ids that outlive
   the sessions that made them: the asker waited forever on a peer that was gone.
-- **Only the duplicate session is suffixed.** `resolve_agent_id()` keeps the plain
-  `<host>:<dir>` unless another *live* session with a different
-  `CLAUDE_CODE_SESSION_ID` already holds it, in which case it appends `#<4 hex>`.
-  Suffixing unconditionally would make ids change every launch, and stable ids are
-  what make announcements persist and addressing possible at all. It is not part of
-  `load_config()` on purpose — the `PreToolUse` hook calls that before every Read
-  and must never touch the network.
+- **The broker assigns ids; the client does not choose one.** `_claim_name()` runs
+  on stream connect and suffixes `#<4 hex of session id>` only when a *different*
+  live session already holds the base. This has to be broker-side: a client would
+  read `/v1/peers`, see the base free, and act on it, and two sessions starting
+  together both read "free" and both claim it. The broker checks and claims in one
+  turn of a single-threaded event loop with nothing awaited between, so the second
+  arrival genuinely sees the first. Suffixing *unconditionally* would be simpler and
+  worse — session ids change every launch, and stable ids are what make an
+  announcement persist and a peer addressable.
+  The monitor requests the base with `claim=1` (older clients omit it and keep the
+  old shared-name behaviour) and adopts the name from the SSE preamble.
+  `GET /v1/whoami?session_id=` lets the stdio MCP server read the same answer back
+  instead of racing separately; it resolves lazily, because that process starts
+  alongside the monitor and the claim may not have happened yet.
+  `resolve_agent_id()` is deliberately not in `load_config()` — the `PreToolUse`
+  hook calls that before every Read and must never touch the network.
+- **A session with no monitor cannot be reached at all**, so its id never collides.
+  Presence and `session_id` are written only by the stream; `announce()` creates an
+  agent row with `connected=0` and no session id, so a roster entry in that shape
+  means that session has never once connected.
 - **Nothing in the broker expires.** Messages, files and ids are permanent. If an
   error message implies otherwise, a peer session will infer a timeout mechanism
   that does not exist and write that conclusion to its memory — errors crossing
