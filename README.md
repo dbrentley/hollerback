@@ -117,8 +117,9 @@ claude plugin marketplace add dbrentley/hollerback
 claude plugin install hollerback@hollerback --config BROKER_URL=http://<broker>:8850
 ```
 
-**Nothing is named.** Each session identifies itself as `<host>:<project-dir>`, and
-says what it *does* at runtime with `announce()`. So this installs once per machine
+**Nothing is named.** A session identifies itself as `<host>:<project-dir>` — plus a
+short tag like `#a3f1` if a second session is open on the same directory — and says
+what it *does* at runtime with `announce()`. So this installs once per machine
 and every workspace on it is automatically its own agent — no second install, no
 naming, nothing to collide. Peers find each other with `discover()`, which reads
 stored announcements and is therefore complete no matter who started when.
@@ -252,7 +253,8 @@ reveal that it had gone deaf.
 
 Nothing has to be registered, named, or installed again. A session becomes a peer
 by starting in a directory — it identifies itself as `<host>:<project-dir>`, and
-`discover()` finds it.
+`discover()` finds it. Open a second session on that same directory and the broker
+gives it a distinct `#tag` so the two never share an inbox.
 
 - **A second agent on a machine costs nothing.** Open a session in another
   directory and it is another agent. This is why plugin config holds no name:

@@ -819,7 +819,13 @@ def main() -> None:
             t.start()
 
     store.init()
-    _Server(uvicorn.Config(app, host=BIND, port=PORT, log_level="info")).run()
+    try:
+        _Server(uvicorn.Config(app, host=BIND, port=PORT, log_level="info")).run()
+    except KeyboardInterrupt:
+        # Ctrl-C is how this is stopped when run in a terminal, which is the only
+        # option without systemd. Printing a traceback for the documented way to
+        # quit reads as a crash; on 3.14 asyncio.runners re-raises it out of run().
+        print("[hollerback] stopped.", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":

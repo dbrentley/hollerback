@@ -8,9 +8,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/dbrentley/hollerback/main/install.sh \
 #     | bash -s -- --broker http://100.64.0.5:8850
 #
-# There is nothing to name. Each session identifies itself as <host>:<project-dir>
-# and says what it does at runtime via the announce() tool, which peers read back
-# with discover(). One install per machine; every workspace on it is its own agent.
+# There is nothing to name. A session identifies itself as <host>:<project-dir>,
+# plus a short tag if a second session is open on the same directory, and says what
+# it does at runtime via announce(), which peers read back with discover(). One
+# install per machine; every workspace on it is its own agent.
 set -uo pipefail
 
 # Printed by --help. Held here rather than sed'd out of the comment header,
@@ -23,8 +24,9 @@ usage() {
       | bash -s -- --broker http://<host>:8850
 
     --broker URL   where the broker is (required unless it is on localhost)
-    --agent NAME   advanced: pin one id for EVERY workspace on this machine.
-                   Normally omit -- each session derives <host>:<project-dir>.
+    --agent NAME   advanced: pin one id for EVERY workspace on this machine, and
+                   disable the automatic tagging that keeps two sessions in one
+                   directory apart. Normally omit.
 
   Nothing needs naming. Install once per machine; every workspace on it is its
   own agent, and each says what it does at runtime via announce().
@@ -221,7 +223,7 @@ if not m:
 print(urllib.parse.unquote(m.group(1).strip()) if m else "")
 WHOEOF
 )
-  echo "    listener connected OK (real sessions derive <host>:<project-dir>)"
+  echo "    listener connected OK (real sessions get their id from the broker)"
 else
   echo "    listener did NOT connect:"; sed 's/^/    /' "$ERRLOG"
 fi
@@ -232,7 +234,8 @@ curl -fsS --max-time 5 -XPOST "$BROKER/v1/forget" \
 
 cat <<EOF
 
-Done. Nothing to name -- each session identifies itself as <host>:<project-dir>.
+Done. Nothing to name -- ids are <host>:<project-dir>, tagged if two sessions
+share a directory.
   * START A NEW SESSION -- /reload-plugins does NOT respawn the MCP server.
   * The workspace must be TRUSTED, or monitors are silently skipped.
   * Status line should show '1 monitor'; you should have 10 hollerback tools.
