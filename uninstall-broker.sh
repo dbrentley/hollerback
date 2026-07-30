@@ -99,7 +99,11 @@ fi
 [ "$removed" = "0" ] && echo "    no broker was installed"
 
 PORT_LEFT=""
-command -v ss >/dev/null 2>&1 && PORT_LEFT="$(ss -lnt 2>/dev/null | grep ':8850' || true)"
+if command -v ss >/dev/null 2>&1; then
+  PORT_LEFT="$(ss -lnt 2>/dev/null | grep ':8850' || true)"
+elif command -v lsof >/dev/null 2>&1; then          # macOS has no ss
+  PORT_LEFT="$(lsof -nP -iTCP:8850 -sTCP:LISTEN 2>/dev/null || true)"
+fi
 if [ -n "$PORT_LEFT" ]; then
   echo "    WARNING: something is still listening on 8850:"
   echo "$PORT_LEFT" | sed 's/^/      /'

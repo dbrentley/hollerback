@@ -92,7 +92,8 @@ else
   # would install a stale plugin and pair a new installer with old code. GitHub is
   # what the documented one-liner points at, so make that authoritative; the broker
   # remains the fallback for a fork, an air-gap, or GitHub being unreachable.
-  TMPZIP="$(mktemp -t hollerback-XXXXXX.zip)"
+  # Explicit template rather than -t: BSD mktemp treats -t as a prefix.
+  TMPZIP="$(mktemp "${TMPDIR:-/tmp}/hollerback-XXXXXX")"
   SRC_DESC=""
   if curl -fsSL --max-time 90 "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" -o "$TMPZIP.tgz" 2>/dev/null; then
     SRC_DESC="github ($REPO@$REF)"
@@ -198,8 +199,15 @@ ERRLOG="$(mktemp)"
 # directory the installer happened to be run from -- a peer that never exists but
 # shows up in discover() forever.
 SMOKE_ID="_install-smoketest"
+# Bounded by hand rather than with `timeout`, which is GNU coreutils and simply
+# absent on macOS -- where this failed with "timeout: command not found" after
+# an otherwise successful install. background + sleep + kill is POSIX.
 HOLLERBACK_BROKER="$BROKER" HOLLERBACK_AGENT="$SMOKE_ID" \
-  timeout 4 "$PY" "$DEST/bin/listen.py" >/dev/null 2>"$ERRLOG"
+  "$PY" "$DEST/bin/listen.py" >/dev/null 2>"$ERRLOG" &
+SMOKE_PID=$!
+sleep 4
+kill "$SMOKE_PID" 2>/dev/null
+wait "$SMOKE_PID" 2>/dev/null
 if grep -q "connected to" "$ERRLOG"; then
   # Prefer the plugin stating its own id. Fall back to decoding it out of the
   # stream URL, because the plugin just installed may be an older build that does
