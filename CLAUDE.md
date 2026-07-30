@@ -253,11 +253,25 @@ Then, in each session:
 - **The workspace must be trusted**, or monitors are skipped with no error at all.
 - **Monitors don't arm in `-p`/headless mode.** Test interactively.
 - Status line should show `1 monitor`, and there should be **10** hollerback tools.
-- **Nothing is named, anywhere.** An agent id is `<host>:<project-dir>` from
-  `_common.default_agent_name()`, with `#<4 hex>` appended by the broker when a
-  second live session holds the same base — so the format is
-  `<host>:<project-dir>[#tag]`, and anything that states the bare form as the whole
-  truth is stale. This exists because `pluginConfigs` is user-scope
+- **Nothing is named, and every id carries a session tag.**
+  `<host>:<project-dir>#<4 hex of CLAUDE_CODE_SESSION_ID>`, from
+  `_common.default_agent_name()`. Tagging *only the duplicate* was tried and
+  removed: it had to ask the broker who was first, so it only worked while the
+  monitor was connected, and did nothing at all where the monitor was not running
+  — which is the case that actually bites. Directory is not an identity either:
+  two sessions legitimately share a working directory doing unrelated work, and
+  would then collide. A local tag needs no coordination and cannot fail that way.
+  The id no longer survives a restart, which is affordable only because nothing is
+  queued for an absent session any more.
+- **Ids contain `:` and `#`, both of which mean something in a URL.** Always
+  `urllib.parse.quote()` an id going into a path — a raw `#` is a fragment
+  delimiter, so `/v1/stream/host:proj#4192` arrives at the server as
+  `host:proj` and silently addresses the wrong agent. (`/` is worse still: it
+  splits the path and 404s, which is why the separator is `:`.)
+- **`announce()` will not overwrite another session's entry.** `set_capabilities`
+  compares the announcing `session_id` against the stored one and returns 409 on a
+  mismatch. Before that, two sessions sharing an id silently clobbered each other
+  and `discover()` showed one wearing the other's description. This exists because `pluginConfigs` is user-scope
   only, so any name stored there is one-per-machine and collides the moment you want
   two agents on one box — which the installers used to handle with a rename-refusal
   and a per-workspace config file, both since deleted. An explicit `HOLLERBACK_AGENT`

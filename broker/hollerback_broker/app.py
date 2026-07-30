@@ -273,7 +273,9 @@ async def announce(request: Request) -> JSONResponse:
         return JSONResponse(
             {"ok": False, "error": "need 'from' and 'capabilities'"}, status_code=400
         )
-    store.set_capabilities(frm, text)
+    ok, why = store.set_capabilities(frm, text, (b.get("session_id") or "").strip())
+    if not ok:
+        return JSONResponse({"ok": False, "error": why}, status_code=409)
     _announce_nudged.discard(frm)
     return JSONResponse({"ok": True, "agent": frm, "capabilities": text})
 

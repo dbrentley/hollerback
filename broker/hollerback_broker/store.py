@@ -115,17 +115,40 @@ def init() -> None:
     BLOB_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def set_capabilities(name: str, text: str) -> None:
-    """Record what an agent says it is. Survives its disconnection on purpose."""
+def set_capabilities(name: str, text: str, session_id: str = "") -> tuple[bool, str]:
+    """Record what an agent says it is. Survives its disconnection on purpose.
+
+    Refuses a takeover: if this name was announced by a DIFFERENT session, the
+    write is rejected rather than silently overwriting. Two sessions sharing a
+    working directory used to derive one id and clobber each other here, so
+    discover() showed one of them wearing the other's description.
+
+    Returns (accepted, reason).
+    """
     now = time.time()
     with _conn() as c:
+        r = c.execute(
+            "SELECT session_id, capabilities FROM agents WHERE name=?", (name,)
+        ).fetchone()
+        if (r is not None and session_id and (r["capabilities"] or "").strip()
+                and r["session_id"] and r["session_id"] != session_id):
+            return False, (
+                f"'{name}' is already announced by a different session "
+                f"({r['session_id'][:8]}...). Refusing to overwrite it -- two "
+                f"sessions are sharing one id, so neither can be addressed "
+                f"reliably. Restart this session so it derives its own id, or set "
+                f"HOLLERBACK_AGENT to something distinct."
+            )
         c.execute(
-            "INSERT INTO agents (name,last_seen,connected,capabilities,announced_at)"
-            " VALUES (?,?,0,?,?)"
+            "INSERT INTO agents (name,session_id,last_seen,connected,capabilities,announced_at)"
+            " VALUES (?,?,?,0,?,?)"
             " ON CONFLICT(name) DO UPDATE SET capabilities=excluded.capabilities,"
-            "  announced_at=excluded.announced_at",
-            (name, now, text, now),
+            "  announced_at=excluded.announced_at,"
+            "  session_id=CASE WHEN excluded.session_id!='' THEN excluded.session_id"
+            "                  ELSE agents.session_id END",
+            (name, session_id, now, text, now),
         )
+    return True, ""
 
 
 def has_announced(name: str) -> bool:

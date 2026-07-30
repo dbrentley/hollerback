@@ -151,6 +151,12 @@ def load_config() -> dict:
     return cfg
 
 
+def instance_tag() -> str:
+    """Four hex chars from this Claude Code session id, or "" if there is none."""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    return hashlib.sha1(sid.encode()).hexdigest()[:4] if sid else ""
+
+
 def default_agent_name() -> str:
     """Derive an id from where this session actually is.
 
@@ -168,6 +174,22 @@ def default_agent_name() -> str:
     /v1/stream/{agent}, and a slash splits it into two segments and 404s the
     route -- percent-encoding does not save it either, since ASGI decodes %2F
     back to a separator before routing.
+
+    ALWAYS tagged with the session, when there is one. Directory alone is not an
+    identity: two sessions legitimately share a working directory while doing
+    unrelated work -- an agent-config repo open for both an iOS and an Android
+    task -- and they then derive one id, receive each other's questions, and
+    overwrite each other's announce(). Tagging only the "duplicate" was tried and
+    is worse than it looks: it needs to know who was first, which means asking the
+    broker, which means it only works when the monitor is connected. Where the
+    monitor is not running -- the case that actually bites -- it silently does
+    nothing. A tag from CLAUDE_CODE_SESSION_ID needs no coordination and cannot
+    fail that way.
+
+    The cost is that an id no longer survives a restart, so an announce() does not
+    carry over. That was worth avoiding while a question could be queued for an
+    absent session; it no longer can be, so the id no longer has to outlive the
+    session it names.
     """
     try:
         host = socket.gethostname().split(".")[0].strip() or "unknown-host"
@@ -178,30 +200,18 @@ def default_agent_name() -> str:
     if root == pathlib.Path.home():
         name = "home"
     safe = lambda s: "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in s)  # noqa: E731
-    return f"{safe(host)}:{safe(name)}"
-
-
-def instance_tag() -> str:
-    """Four hex chars derived from this Claude Code session id, or "" if absent."""
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-    return hashlib.sha1(sid.encode()).hexdigest()[:4] if sid else ""
+    base = f"{safe(host)}:{safe(name)}"
+    tag = instance_tag()
+    return f"{base}#{tag}" if tag else base
 
 
 def resolve_agent_id(cfg: dict) -> str:
-    """The name the broker assigned this session, falling back to the base id.
+    """This session's id, confirmed against the broker where possible.
 
-    Duplicate detection lives in the broker, not here. Two sessions in one
-    directory derive the same <host>:<dir>; deciding client-side which of them is
-    "the duplicate" means reading /v1/peers and then acting on it, and two
-    sessions starting together both read "free" and both claim it. The broker can
-    check and claim in one turn of its event loop, so it is the only place that
-    can answer correctly.
-
-    The monitor's connection makes the claim; this reads the answer back by
-    session id so the stdio MCP server agrees without a second race. If the
-    monitor has not connected yet -- or at all -- this returns the base id, which
-    is also the right answer: a session with no monitor cannot receive anything,
-    so it has nothing to collide over.
+    default_agent_name() already yields something unique per session, so this is
+    normally just that. It still asks the broker, because a session started
+    without CLAUDE_CODE_SESSION_ID has no tag of its own and the broker may have
+    had to disambiguate it on connect.
 
     Deliberately NOT part of load_config(): the PreToolUse hook calls that before
     every Read, and it must never touch the network.
@@ -218,17 +228,11 @@ def resolve_agent_id(cfg: dict) -> str:
     except Exception:  # noqa: BLE001 - never block startup on the broker
         return base
     assigned = (r or {}).get("agent")
-    # Only adopt a name that is OUR base, or our base plus a tag. The broker keys
-    # assignments by session id, and if that ever maps to a different workspace --
-    # a reused id, a copied env, a stale record -- adopting it would silently make
-    # this session answer as another one. Distrusting it costs nothing: the base is
-    # always a correct answer for a session nobody else is holding.
+    # Only ever adopt our own base, or our base plus a tag. Anything else means
+    # the broker's record maps this session id somewhere unrelated, and adopting
+    # it would make this session answer as another one.
     if assigned and (assigned == base or assigned.startswith(base + "#")):
-        if assigned != base:
-            log(f"broker assigned this session {assigned} (another holds {base})")
         return assigned
-    if assigned:
-        log(f"ignoring broker id {assigned!r}: not this workspace ({base})")
     return base
 
 

@@ -9,8 +9,8 @@
 
       & ([scriptblock]::Create((iwr https://raw.githubusercontent.com/dbrentley/hollerback/main/install-windows.ps1 -UseBasicParsing).Content)) -Broker http://100.64.0.5:8850
 
-  There is nothing to name. A session identifies itself as <host>:<project-dir>,
-  plus a short tag if a second session is open on the same directory, and says what
+  There is nothing to name. A session identifies itself as
+  <host>:<project-dir>#<tag>, unique even when two sessions share a directory, and says what
   it does at runtime via announce(), which peers read back with discover(). One
   install per machine; every workspace on it is its own agent.
 #>
@@ -219,8 +219,7 @@ try {
 } catch { }   # older brokers have no /v1/forget; harmless
 
 Write-Host ""
-Write-Host "Done. Nothing to name -- ids are <host>:<project-dir>, tagged if two" -ForegroundColor Cyan
-Write-Host "sessions share a directory." -ForegroundColor Cyan
+Write-Host "Done. Nothing to name -- ids are <host>:<project-dir>#<tag>." -ForegroundColor Cyan
 Write-Host "  * START A NEW SESSION -- /reload-plugins does NOT respawn the MCP server." -ForegroundColor White
 Write-Host "  * The workspace must be TRUSTED, or monitors are silently skipped." -ForegroundColor White
 Write-Host "  * Status line should show '1 monitor'; you should have 10 hollerback tools." -ForegroundColor White

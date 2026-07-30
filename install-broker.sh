@@ -201,9 +201,9 @@ Broker:    http://$BIND:$PORT
 Dashboard: http://$BIND:$PORT/          <- who is on the network
 
 Now install the plugin on each session's machine -- once per machine, nothing
-to name. A session identifies itself as <host>:<project-dir>, and if two are
-open on the same directory the second gets a short tag -- <host>:<dir>#a3f1 --
-so they stay distinct. Every workspace is automatically its own agent.
+to name. A session identifies itself as <host>:<project-dir>#<tag>, where the
+tag comes from its own session -- so two sessions sharing a directory are still
+distinct. Every workspace is automatically its own agent.
 
     curl -fsSL http://$BIND:$PORT/install.sh | bash -s -- --broker http://$BIND:$PORT
 

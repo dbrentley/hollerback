@@ -553,7 +553,12 @@ def call_tool(name: str, args: dict) -> dict:
             if not text:
                 return _err("announce needs 'capabilities' -- what is this session for?")
             r = http_json(
-                f"{BROKER}/v1/announce", {"from": AGENT, "capabilities": text}, TOKEN
+                f"{BROKER}/v1/announce",
+                # session_id lets the broker tell "this session updating itself"
+                # from "a different session taking over the name".
+                {"from": AGENT, "capabilities": text,
+                 "session_id": os.environ.get("CLAUDE_CODE_SESSION_ID", "")},
+                TOKEN,
             )
             if not r.get("ok"):
                 err = str(r.get("error", ""))

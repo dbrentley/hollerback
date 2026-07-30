@@ -11,8 +11,8 @@ instead of guessing or making the user relay.
 
 ## Say what you are, once
 
-Nobody names these sessions. Each one is `<host>:<project-dir>` — derived, not
-configured, and carrying a short `#tag` when another session shares its directory — so an id tells a peer *where* you are and nothing about what you
+Nobody names these sessions. Each one is `<host>:<project-dir>#<tag>` — derived,
+not configured, and unique even when two sessions share a working directory — so an id tells a peer *where* you are and nothing about what you
 know. **Call `announce()` early**, with what this codebase is and what you can
 answer authoritatively:
 
