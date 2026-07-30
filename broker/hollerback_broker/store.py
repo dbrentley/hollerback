@@ -253,7 +253,9 @@ def take_undelivered(to_agent: str) -> list[dict]:
 
     Two categories, and the second one matters more than it looks:
 
-    1. Anything never written to a stream at all.
+    1. Anything never written to a stream at all. Rare now that sends to an
+       absent session are refused outright, but a message can still race a
+       subscriber disappearing between the check and the write.
     2. Any QUESTION that was written to a stream but is still unanswered.
     3. Any FILE that was announced but never actually fetched.
 

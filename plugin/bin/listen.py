@@ -38,7 +38,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import add_open_question, load_config, log  # noqa: E402
+from _common import add_open_question, load_config, log, resolve_agent_id  # noqa: E402
 
 RECONNECT_MIN = 2.0
 RECONNECT_MAX = 30.0
@@ -176,7 +176,8 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = load_config()
-    agent = args.agent or cfg["agent"]
+    # Disambiguate against a session already live in this directory.
+    agent = args.agent or resolve_agent_id(cfg)
     broker = args.broker or cfg["broker"]
     token = args.token or cfg["token"]
 

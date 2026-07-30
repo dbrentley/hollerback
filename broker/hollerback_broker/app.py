@@ -169,6 +169,21 @@ def resolve_peer(target: str) -> tuple[str | None, list[dict]]:
     return None, hits or agents
 
 
+def _offline(target: str) -> str:
+    """Why a send was refused, and what to do instead."""
+    return (
+        f"'{target}' is not connected, so nothing was sent. hollerback does not "
+        f"hold messages for absent sessions -- a queued message to a session that "
+        f"never comes back is worse than a refusal, because you would wait on an "
+        f"answer nobody is writing. Call discover() to see who is online."
+    )
+
+
+def _online(name: str) -> bool:
+    """Live subscribers, not the stored flag -- the flag can lag a hard drop."""
+    return bool(_subscribers.get(name))
+
+
 def _ambiguous(target: str, candidates: list) -> str:
     listing = "\n".join(
         f"  {a['name']} — {a.get('capabilities') or '(has not announced)'}"
@@ -262,33 +277,15 @@ async def ask(request: Request) -> JSONResponse:
     if resolved is None:
         return JSONResponse({"ok": False, "error": _ambiguous(to, candidates)}, status_code=404)
     to = resolved
+    if not _online(to):
+        return JSONResponse({"ok": False, "error": _offline(to)}, status_code=409)
 
-    agents = store.list_agents()
-    known = {a["name"] for a in agents}
     msg = store.add_message(to, frm, "question", text, b.get("context") or "")
     live = _deliver(msg)
 
-    if live:
-        note = f"delivered to {to} now"
-    elif to in known:
-        # "when its session starts" over-promised: it implies delivery is coming,
-        # when the session may already be running with a dead monitor, or gone for
-        # good. Say what is actually true -- it is stored, and it moves only if
-        # something reconnects under that name.
-        seen = next((a["seconds_since_seen"] for a in agents if a["name"] == to), None)
-        ago = f", last seen {int(seen)}s ago" if seen is not None else ""
-        note = (
-            f"no session is connected as '{to}' right now{ago}. This is stored and "
-            f"nothing expires, but it is delivered only when a session reconnects "
-            f"under that name -- do not wait on it"
-        )
-    else:
-        note = (
-            f"no session named {to!r} has ever connected"
-            f" (known peers: {sorted(known) or 'none'}) — check the name"
-        )
     return JSONResponse(
-        {"ok": True, "request_id": msg["id"], "peer_online": live, "note": note}
+        {"ok": True, "request_id": msg["id"], "peer_online": live,
+         "note": f"delivered to {to} now"}
     )
 
 
@@ -371,12 +368,14 @@ async def note(request: Request) -> JSONResponse:
         if resolved is None:
             return JSONResponse({"ok": False, "error": _ambiguous(to, candidates)}, status_code=404)
         to = resolved
+        if not _online(to):
+            return JSONResponse({"ok": False, "error": _offline(to)}, status_code=409)
 
     if to == "*":
-        targets = [a["name"] for a in store.list_agents() if a["name"] != frm]
+        targets = [n for n in _subscribers if n != frm]
         if not targets:
             return JSONResponse(
-                {"ok": False, "error": "no other peers have ever connected"},
+                {"ok": False, "error": "no other sessions are connected right now"},
                 status_code=404,
             )
         sent = []
@@ -435,6 +434,8 @@ async def upload_file(request: Request) -> JSONResponse:
     if resolved is None:
         return JSONResponse({"ok": False, "error": _ambiguous(to, candidates)}, status_code=404)
     to = resolved
+    if not _online(to):
+        return JSONResponse({"ok": False, "error": _offline(to)}, status_code=409)
     try:
         data = base64.b64decode(b["data"], validate=True)
     except Exception:

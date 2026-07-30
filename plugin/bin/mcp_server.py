@@ -38,13 +38,15 @@ for _stream in (sys.stdin, sys.stdout):
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import urllib.parse  # noqa: E402
 
-from _common import clear_open_question, http_json, load_config, log  # noqa: E402
+from _common import (  # noqa: E402
+    clear_open_question, http_json, load_config, log, resolve_agent_id,
+)
 
 PROTOCOL_VERSION = "2024-11-05"
 MAX_FILE_BYTES = int(os.environ.get("HOLLERBACK_MAX_FILE_BYTES", str(10 * 1024 * 1024)))
 
 CFG = load_config()
-AGENT = CFG["agent"]
+AGENT = resolve_agent_id(CFG)
 BROKER = CFG["broker"]
 TOKEN = CFG["token"]
 
@@ -96,6 +98,8 @@ TOOLS = [
             "codebase, then keep working -- this returns immediately and does NOT "
             "block. The peer answers at its next stopping point and the answer "
             "arrives later as a notification, like a background agent finishing.\n\n"
+            "The peer must be connected: sending to an offline session is refused "
+            "rather than queued, so call discover() first if you are unsure.\n\n"
             "Use it for things only the live peer session knows: what it just "
             "decided, what it is midway through changing, why an interface looks "
             "the way it does. For questions the code already answers, just read "
@@ -335,7 +339,7 @@ def call_tool(name: str, args: dict) -> dict:
                 return _err(f"could not answer: {r.get('error')}")
             # Closes the read-only auto-allow window for this question.
             clear_open_question(rid)
-            where = "delivered now" if r.get("delivered_now") else "queued until their session is up"
+            where = "delivered now" if r.get("delivered_now") else "stored; they were not connected"
             return _ok(f"Answer sent to '{r.get('to')}' ({where}).")
 
         if name == "send_file":
@@ -376,7 +380,7 @@ def call_tool(name: str, args: dict) -> dict:
             )
             if not r.get("ok"):
                 return _err(f"upload failed: {r.get('error')}")
-            where = "delivered now" if r.get("peer_online") else "queued until their session is up"
+            where = "delivered now" if r.get("peer_online") else "stored; they were not connected"
             return _ok(
                 f"Sent {src.name} ({r['size']:,} bytes) to '{peer}' — {where}. "
                 f"file_id={r['file_id']}"

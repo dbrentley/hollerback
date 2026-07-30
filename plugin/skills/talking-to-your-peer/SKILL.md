@@ -67,9 +67,14 @@ Ask when the answer lives in the peer's head, not in the code:
 schema, or a type definition, read it — that is faster and more reliable than a
 round trip. Do not ask the peer to do work for you; ask for facts.
 
-A question to an offline peer is still delivered when its session starts, so
-asking is never wasted — it may just be slow. Address the session that actually
-owns the answer; asking the wrong one wastes a round trip.
+**You can only reach a session that is connected right now.** Sending to an
+offline peer is refused outright — nothing is queued and nothing is held for
+later. That is deliberate: a message parked for a session that never returns
+leaves you waiting on an answer nobody is writing. `discover()` shows who is
+online, so check there rather than guessing, and address the session that
+actually owns the answer.
+
+If the peer you need is offline, say so to the user rather than waiting.
 
 ## Sharing files
 

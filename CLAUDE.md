@@ -94,6 +94,19 @@ Break any of these and the failure is silent, not loud.
 - **The `PreToolUse` hook may only ever skip a prompt, never deny.** It auto-allows
   `Read|Grep|Glob|NotebookRead` and only while a question is open. A denying hook
   could break the user's own work in their own session.
+- **Nothing is queued for an absent session.** `/v1/ask`, `/v1/note` and
+  `/v1/file` all refuse with 409 when the target has no live subscriber, and
+  broadcast reaches only connected peers. Presence comes from the in-memory
+  `_subscribers` set, not the stored flag, because the flag can lag a hard drop.
+  The old behaviour queued indefinitely, which paired badly with ids that outlive
+  the sessions that made them: the asker waited forever on a peer that was gone.
+- **Only the duplicate session is suffixed.** `resolve_agent_id()` keeps the plain
+  `<host>:<dir>` unless another *live* session with a different
+  `CLAUDE_CODE_SESSION_ID` already holds it, in which case it appends `#<4 hex>`.
+  Suffixing unconditionally would make ids change every launch, and stable ids are
+  what make announcements persist and addressing possible at all. It is not part of
+  `load_config()` on purpose — the `PreToolUse` hook calls that before every Read
+  and must never touch the network.
 - **Nothing in the broker expires.** Messages, files and ids are permanent. If an
   error message implies otherwise, a peer session will infer a timeout mechanism
   that does not exist and write that conclusion to its memory — errors crossing

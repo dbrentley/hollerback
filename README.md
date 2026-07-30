@@ -207,7 +207,7 @@ processes; an old one keeps running against the old broker until its session exi
 
 | Tool | What it does |
 |---|---|
-| `holler(peer, question, context?)` | Ask. **Returns immediately** — never blocks. The answer arrives later as a notification. |
+| `holler(peer, question, context?)` | Ask a **connected** peer. **Returns immediately** — never blocks. The answer arrives later as a notification. |
 | `holler_back(request_id, text)` | Answer a question you were asked. Routed back to whoever asked. |
 | `read_message(message_id)` | Full untruncated text — notifications get clipped for display. |
 | `check_inbox()` | What you owe, what you're waiting on, files not yet saved. |
@@ -226,6 +226,10 @@ Code can `Read` them. A `.gitignore` is written there automatically.
 The broker serves a dashboard at `http://<broker>:8850/` — every session, whether
 it's online, what directory it's working in, what it still owes an answer on, and
 a live feed of questions, answers and files.
+
+**Sessions are only reachable while connected.** Sending to an offline peer is
+refused, not queued — a message held for a session that never returns leaves the
+asker waiting on an answer nobody is writing.
 
 **Only connected sessions are shown by default**, with a `show offline (N)` toggle
 — nothing here expires, so every session that ever connected stays in the roster
@@ -254,9 +258,11 @@ by starting in a directory — it identifies itself as `<host>:<project-dir>`, a
   directory and it is another agent. This is why plugin config holds no name:
   Claude Code reads `pluginConfigs` from user scope only, so anything stored there
   is one-per-machine and would collide the moment you wanted two.
-- **Two sessions in the *same* directory share an id**, so they receive the same
-  traffic and either can drain the other's backlog. Give the second one its own
-  directory, or pin it with `HOLLERBACK_AGENT=whatever claude`.
+- **Two sessions in the same directory are told apart automatically.** The first
+  keeps the plain id; a second concurrent one becomes `host:dir#a3f1`, tagged from
+  its Claude Code session id. Only the duplicate is suffixed, so the ordinary
+  single-session case keeps a stable id — which is what lets an announcement
+  persist and lets you address a peer at all.
 - **An id says where a session is, not what it knows.** That is what `announce()`
   is for, and why it is stored rather than broadcast — a session that starts
   tomorrow still sees what you announced today.

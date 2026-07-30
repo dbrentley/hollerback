@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 import pathlib
 import socket
 import sys
@@ -177,6 +178,51 @@ def default_agent_name() -> str:
         name = "home"
     safe = lambda s: "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in s)  # noqa: E731
     return f"{safe(host)}:{safe(name)}"
+
+
+def instance_tag() -> str:
+    """Four hex chars derived from this Claude Code session id, or "" if absent."""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    return hashlib.sha1(sid.encode()).hexdigest()[:4] if sid else ""
+
+
+def resolve_agent_id(cfg: dict) -> str:
+    """The base id, or base#tag when another live session already holds it.
+
+    Two sessions in the same directory derive the same <host>:<dir> and then both
+    receive every question addressed to it -- so both answer, and the asker gets
+    two replies to one request_id. Suffixing unconditionally would fix that and
+    break more: session ids change every launch, so the id would stop being
+    stable, and a stable id is what makes announcements persist and lets you
+    address a peer at all.
+
+    So only the *duplicate* is suffixed. The first session in a directory keeps
+    the plain id; a second concurrent one becomes base#tag for as long as it runs.
+
+    Both the monitor and the stdio MCP server call this. They are separate
+    processes, but both see the same CLAUDE_CODE_SESSION_ID and ask the same
+    broker, so they derive the same answer without coordinating.
+
+    Deliberately NOT part of load_config(): the PreToolUse hook calls that before
+    every Read, and it must never touch the network.
+    """
+    base = cfg.get("agent") or ""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    # An explicitly pinned name is the operator's choice; do not second-guess it.
+    if not base or not sid or os.environ.get("HOLLERBACK_AGENT") or not cfg.get("broker"):
+        return base
+    try:
+        peers = http_json(f"{cfg['broker']}/v1/peers", None, cfg.get("token", ""), timeout=5)
+    except Exception:  # noqa: BLE001 - never block startup on the broker
+        return base
+    for p in peers.get("peers", []):
+        if (p.get("name") == base and p.get("online")
+                and p.get("session_id") and p["session_id"] != sid):
+            tag = instance_tag()
+            if tag:
+                log(f"'{base}' is already live in another session; using {base}#{tag}")
+                return f"{base}#{tag}"
+    return base
 
 
 # --- open-question state ----------------------------------------------------
