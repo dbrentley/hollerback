@@ -58,6 +58,11 @@ cwd = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
 say(INFO, f"python {sys.version.split()[0]} at {sys.executable}")
 say(INFO, f"cwd    {cwd}")
 say(INFO, f"host   {socket.gethostname().split('.')[0]}")
+if cwd == pathlib.Path.home() and not os.environ.get("CLAUDE_PROJECT_DIR"):
+    say(WARN, "running from your HOME directory, not a project",
+        "trust, the derived id and the project config layer are all per-directory,\n"
+        "           so those results below describe ~ and not the workspace you mean.\n"
+        "           cd into the project and run this again.")
 if sys.version_info < (3, 8):
     say(BAD, "python is older than 3.8", "the plugin needs 3.8+")
 
@@ -215,8 +220,10 @@ try:
             say(INFO, "  " + r[:150])
     else:
         say(BAD, "no listen.py is running",
-            "this session can send but can NEVER receive -- no answers, no "
-            "questions, no files")
+            "this session can send but can NEVER receive -- no answers, no\n"
+            "           questions, no files. Note a monitor retries forever, so if the\n"
+            "           broker is down, fix that FIRST and check here again -- an\n"
+            "           already-armed monitor reconnects on its own.")
 except Exception as exc:  # noqa: BLE001
     say(WARN, "could not list processes", str(exc))
 
@@ -230,8 +237,25 @@ if cfg["broker"]:
         broker_ver = h.get("version")
         say(OK, f"reachable, version {broker_ver}")
     except urllib.error.URLError as exc:
-        say(BAD, f"cannot reach {cfg['broker']}", f"{exc}\n           "
-            "is the broker running? is the host reachable (Tailscale up)?")
+        loopback = any(h in cfg["broker"] for h in ("127.0.0.1", "localhost", "::1"))
+        envf = home / ".config" / "hollerback" / "broker.env"
+        venv = home / ".local" / "share" / "hollerback" / "broker" / ".venv" / "bin" / "python"
+        if loopback and venv.is_file():
+            say(BAD, "the broker is installed here but NOT running",
+                f"{exc}\n           "
+                "Nothing starts it on a machine without systemd -- the installer\n"
+                "           prints the command and launches nothing. Run, and leave open:\n\n"
+                f"             set -a; . {envf}; set +a\n"
+                f"             {venv} -m hollerback_broker.app\n")
+        elif loopback:
+            say(BAD, f"nothing is listening on {cfg['broker']}",
+                f"{exc}\n           "
+                "No broker is installed on this machine either. Either install one\n"
+                "           here, or point the plugin at the machine that has it.")
+        else:
+            say(BAD, f"cannot reach {cfg['broker']}", f"{exc}\n           "
+                "Is the broker running on that host, and is the network up\n"
+                "           (Tailscale/VPN connected)?")
     except Exception as exc:  # noqa: BLE001
         say(BAD, "broker responded but not with health JSON", str(exc))
 
